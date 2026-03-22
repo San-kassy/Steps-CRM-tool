@@ -1,7 +1,59 @@
 const express = require('express');
 const router = express.Router();
 const PayrollRun = require('../models/PayrollRun');
+const Employee = require('../models/Employee');
 const { checkSecurityRole } = require('../middleware/securityAuth');
+
+// GET prepared employee list for a new payroll run
+// Query param: paymentSchedule (optional) — filters to matching employees only
+router.get('/prepare', async (req, res) => {
+  try {
+    const { paymentSchedule } = req.query;
+
+    // Build filter: only Active employees
+    const filter = { status: 'Active' };
+
+    // If a schedule is given, include employees that match or have no schedule set
+    if (paymentSchedule) {
+      filter.$or = [
+        { paySchedule: paymentSchedule },
+        { paySchedule: { $exists: false } },
+        { paySchedule: null },
+        { paySchedule: '' },
+      ];
+    }
+
+    const employees = await Employee.find(filter).lean();
+
+    const prepared = employees.map((emp) => {
+      const baseSalary = emp.salary || 0;
+      const bonus = emp.bonus || 0;
+      const allowances = emp.allowances || 0;
+      const grossPay = baseSalary + bonus + allowances;
+
+      return {
+        id: emp._id,
+        name: `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.email,
+        department: emp.department || '',
+        paySchedule: emp.paySchedule || null,
+        baseSalary,
+        bonus,
+        allowances,
+        regularHours: 0,
+        overtime: 0,
+        commission: 0,
+        grossPay,
+        status: baseSalary > 0 ? 'Ready' : 'Incomplete',
+      };
+    });
+
+    res.json({ success: true, data: prepared });
+  } catch (err) {
+    console.error('Error preparing payroll employees:', err);
+    res.status(500).json({ success: false, message: 'Failed to prepare payroll employees' });
+  }
+});
+
 
 // GET all historical payroll runs
 router.get('/runs', async (req, res) => {

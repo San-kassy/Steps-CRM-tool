@@ -161,11 +161,25 @@ export const AppProvider = ({ children }) => {
     });
   };
 
-  // Check module access based on role
+  // Check module access: per-user grants first, then role-based defaults
   const hasModuleAccess = (moduleName) => {
-    if (userRole === "admin") return true;
+    // Admins always have full access
+    const normalizedRole = (user?.role || "").toLowerCase();
+    if (normalizedRole === "admin" || normalizedRole === "security admin") return true;
 
-    // Define role-based access
+    // Check per-user module grants (set by Admin in user management)
+    const userModules = user?.permissions?.modules;
+    if (Array.isArray(userModules) && userModules.length > 0) {
+      // If explicit per-user modules are set, use them exclusively
+      return userModules.some(
+        (m) => m.access === true && (
+          m.moduleName === moduleName ||
+          String(m.moduleName).toLowerCase() === String(moduleName).toLowerCase()
+        )
+      );
+    }
+
+    // Fall back to role-based defaults when no per-user overrides exist
     const rolePermissions = {
       user: [
         "Accounting",
@@ -183,7 +197,6 @@ export const AppProvider = ({ children }) => {
         "Analytics",
         "Incident Reporting",
       ],
-      admin: ["*"], // All modules
     };
 
     const allowedModules = rolePermissions[userRole] || [];

@@ -8,6 +8,11 @@ import { formatCurrency } from "../../services/currency";
 
 const RetirementManagement = ({ onBack }) => {
   const { user } = useAuth();
+  const resolvedUserId = user?.id || user?._id || user?.userId || "";
+  const resolvedEmployeeName =
+    user?.fullName ||
+    [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+    "Employee";
   const [lineItems, setLineItems] = useState([]);
   const [newItem, setNewItem] = useState({
     date: "",
@@ -40,13 +45,17 @@ const RetirementManagement = ({ onBack }) => {
 
       // Fetch all retirement breakdowns for the user
       const response = await apiService.get(
-        `/api/retirement-breakdown?userId=${user?.id}`
+        `/api/retirement-breakdown?userId=${resolvedUserId}`,
       );
-      const breakdowns = response.data || [];
+      const breakdowns = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.data)
+          ? response.data
+          : [];
 
       // Find the previous month's breakdown
       const prevMonthData = breakdowns.find(
-        (breakdown) => breakdown.monthYear === prevMonthStr
+        (breakdown) => breakdown.monthYear === prevMonthStr,
       );
 
       if (prevMonthData) {
@@ -54,8 +63,8 @@ const RetirementManagement = ({ onBack }) => {
         setPreviousClosingBalance(prevMonthData.newOpeningBalance || 0);
         toast.success(
           `Previous closing balance auto-filled: ${formatCurrency(
-            prevMonthData.newOpeningBalance || 0
-          )}`
+            prevMonthData.newOpeningBalance || 0,
+          )}`,
         );
       } else {
         // If no previous month data, clear the field for manual entry
@@ -65,7 +74,7 @@ const RetirementManagement = ({ onBack }) => {
       console.error("Error fetching previous month balance:", error);
       // Don't show error toast here as it might not be critical
     }
-  }, [monthYear, setPreviousClosingBalance, user?.id]);
+  }, [monthYear, resolvedUserId, setPreviousClosingBalance]);
 
   useEffect(() => {
     fetchPreviousMonthBalance();
@@ -114,6 +123,10 @@ const RetirementManagement = ({ onBack }) => {
   // Use centralized currency formatter
 
   const handleSubmitBreakdown = async () => {
+    if (!resolvedUserId) {
+      toast.error("Unable to determine current user. Please re-login.");
+      return;
+    }
     if (lineItems.length === 0)
       return toast.error("Please add at least one expense item");
     if (!monthYear) return toast.error("Please select the month and year");
@@ -122,8 +135,8 @@ const RetirementManagement = ({ onBack }) => {
 
     try {
       const request = {
-        userId: user?.id,
-        employeeName: user?.fullName || "Employee",
+        userId: resolvedUserId,
+        employeeName: resolvedEmployeeName,
         monthYear,
         previousClosingBalance: Number(previousClosingBalance) || 0,
         inflowAmount: Number(inflowAmount) || 0,
@@ -142,11 +155,15 @@ const RetirementManagement = ({ onBack }) => {
   };
 
   const handleSaveDraft = async () => {
+    if (!resolvedUserId) {
+      toast.error("Unable to determine current user. Please re-login.");
+      return;
+    }
     if (!monthYear) return toast.error("Please select the month and year");
     try {
       const request = {
-        userId: user?.id,
-        employeeName: user?.fullName || "Employee",
+        userId: resolvedUserId,
+        employeeName: resolvedEmployeeName,
         monthYear,
         previousClosingBalance: Number(previousClosingBalance) || 0,
         inflowAmount: Number(inflowAmount) || 0,
@@ -159,7 +176,7 @@ const RetirementManagement = ({ onBack }) => {
       await apiService.post("/api/retirement-breakdown", request);
       toast.success("Draft saved");
     } catch (error) {
-      toast.error("Failed to save draft");
+      toast.error(error?.serverData?.error || "Failed to save draft");
       console.error(error);
     }
   };

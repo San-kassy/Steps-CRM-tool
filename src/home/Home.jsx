@@ -505,13 +505,25 @@ export default function Home() {
                 }[icon.color] ||
                 "from-gray-50 to-gray-100 text-gray-600 border-gray-100";
 
+              const canAccess = hasModuleAccess(m.name);
+
               return (
                 <button
                   key={getModuleRouteId(m) || m.name}
                   onClick={() => handleOpenModule(getModuleRouteId(m))}
                   aria-label={`Open ${m.name} module`}
-                  className="group relative flex flex-col items-center p-2 bg-transparent rounded-2xl border border-[#dbe0e6] shadow-sm h-[200px] hover:shadow-xl transition-shadow"
+                  className={`group relative flex flex-col items-center p-2 bg-transparent rounded-2xl border border-[#dbe0e6] shadow-sm h-[200px] transition-shadow ${
+                    canAccess
+                      ? "hover:shadow-xl"
+                      : "opacity-50 cursor-not-allowed grayscale"
+                  }`}
                 >
+                  {/* Lock badge for denied modules */}
+                  {!canAccess && (
+                    <span className="absolute top-2 right-2 bg-gray-200 text-gray-500 rounded-full w-6 h-6 flex items-center justify-center z-10">
+                      <i className="fa-solid fa-lock text-xs"></i>
+                    </span>
+                  )}
                   <div
                     className={`size-20 bg-gradient-to-br ${colorClass} flex items-center justify-center mb-6 shadow-sm border rounded-full border-transparent group-hover:border-current transition-colors`}
                   >
@@ -523,8 +535,12 @@ export default function Home() {
                   <p className="text-sm text-[#617589] text-center">
                     {/* Click to access this module */}
                   </p>
-                  <div className="mt-4 py-1 px-3 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full">
-                    Explore
+                  <div className={`mt-4 py-1 px-3 text-xs font-semibold rounded-full ${
+                    canAccess
+                      ? "bg-blue-50 text-blue-700"
+                      : "bg-gray-100 text-gray-400"
+                  }`}>
+                    {canAccess ? "Explore" : "No Access"}
                   </div>
                 </button>
               );

@@ -36,8 +36,10 @@ export const validateEmployeeProfile = (employee, isHR = false) => {
   const errors = {};
 
   // Required fields for all users
-  if (!validateRequired(employee.name)) {
-    errors.name = 'Name is required';
+  if (!validateRequired(employee.firstName) || !validateRequired(employee.lastName)) {
+    if (!validateRequired(employee.name)) {
+      errors.name = 'First name and last name are required';
+    }
   }
 
   if (!validateRequired(employee.email)) {

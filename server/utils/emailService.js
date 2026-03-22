@@ -217,13 +217,6 @@ async function sendPasswordResetEmail(userData, resetToken) {
   }
 }
 
-module.exports = {
-  sendApprovalEmail,
-  sendPOReviewEmail,
-  sendPasswordResetEmail,
-  sendEmailOTP,
-  transporter,
-};
 
 // Send OTP code email for MFA verification
 async function sendEmailOTP(toEmail, code, userName) {
@@ -604,10 +597,73 @@ async function sendInventoryExpiryAlertEmail(recipientEmails, alertData) {
   }
 }
 
+// Send Welcome and Verification Email
+async function sendWelcomeVerificationEmail(email, name, verificationToken) {
+  if (!email || !verificationToken) {
+    throw new Error('Email and verificationToken are required to send verification email');
+  }
+
+  const verifyLink = `${frontendUrl}/verify-email?token=${verificationToken}`;
+
+  const mailOptions = {
+    from: emailUser,
+    to: email,
+    subject: 'Welcome to Steps CRM - Please Verify Your Email',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <div style="background-color: #0d6efd; padding: 24px; text-align: center;">
+          <h2 style="color: white; margin: 0; font-size: 24px;">Welcome to Steps CRM! 🚀</h2>
+        </div>
+        
+        <div style="padding: 32px 24px;">
+          <p style="font-size: 16px; color: #374151; margin-bottom: 16px;">Hi ${name || 'there'},</p>
+          <p style="font-size: 16px; color: #4b5563; line-height: 1.6; margin-bottom: 24px;">
+            Thank you for signing up! We're excited to have you on board.
+            To complete your registration and secure your account, please verify your email address by clicking the button below.
+          </p>
+          
+          <div style="text-align: center; margin: 32px 0;">
+            <a href="${verifyLink}" style="background-color: #0d6efd; color: white; padding: 14px 32px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; display: inline-block;">
+              Verify Email Address
+            </a>
+          </div>
+
+          <p style="font-size: 14px; color: #6b7280; margin-bottom: 8px;">
+            This verification link will expire in <strong>48 hours</strong>.
+          </p>
+          <p style="font-size: 14px; color: #6b7280; line-height: 1.5;">
+            If you did not sign up for an account, please ignore this email.
+          </p>
+        </div>
+        
+        <div style="background-color: #f9fafb; border-top: 1px solid #e5e7eb; padding: 16px 24px; text-align: center;">
+          <p style="color: #9ca3af; font-size: 12px; margin: 0;">This is an automated email — do not reply.</p>
+        </div>
+      </div>
+    `,
+  };
+
+  try {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('📧 Verification email would be sent to:', email);
+      console.log('   Verification Link:', verifyLink);
+      return { success: true, message: 'Verification email logged (dev mode)' };
+    }
+    
+    await transporter.sendMail(mailOptions);
+    return { success: true, message: 'Verification email sent successfully' };
+  } catch (error) {
+    console.error('Error sending verification email:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = {
   sendApprovalEmail,
   sendPOReviewEmail,
   sendPasswordResetEmail,
+  sendEmailOTP,
+  sendWelcomeVerificationEmail,
   sendSecurityAlertEmail,
   sendNotificationRuleEmail,
   sendSignatureRequestEmail,

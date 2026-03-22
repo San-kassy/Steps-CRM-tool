@@ -88,17 +88,52 @@ async function getApproverByRole(approverRole, requestData) {
   try {
     let approver = null;
 
+    const toDisplayName = (person = {}) => {
+      const fromParts = [person.firstName, person.lastName].filter(Boolean).join(' ').trim();
+      return fromParts || person.fullName || person.name || person.email || 'Unknown';
+    };
+
+    const resolveEmployeeFromRequest = async () => {
+      if (requestData.employeeId) {
+        const employeeId = String(requestData.employeeId).trim();
+        let employee = await Employee.findOne({ employeeId });
+        if (!employee && employeeId.match(/^[0-9a-fA-F]{24}$/)) {
+          employee = await Employee.findById(employeeId);
+        }
+        if (employee) return employee;
+      }
+
+      if (requestData.userId) {
+        const user = await User.findById(String(requestData.userId)).lean();
+        if (user?.employeeRef) {
+          const employee = await Employee.findById(user.employeeRef);
+          if (employee) return employee;
+        }
+        if (user?.email) {
+          const employee = await Employee.findOne({ email: user.email.toLowerCase() });
+          if (employee) return employee;
+        }
+      }
+
+      return null;
+    };
+
     switch (approverRole) {
       case 'Direct Manager':
-        // Get employee's direct manager
-        if (requestData.employeeId) {
-          const employee = await Employee.findOne({ employeeId: requestData.employeeId });
-          if (employee && employee.managerId) {
-            const manager = await Employee.findOne({ employeeId: employee.managerId });
+        // Resolve requester employee then route to their assigned manager.
+        {
+          const employee = await resolveEmployeeFromRequest();
+          if (employee?.managerId) {
+            const managerId = String(employee.managerId).trim();
+            let manager = await Employee.findOne({ employeeId: managerId });
+            if (!manager && managerId.match(/^[0-9a-fA-F]{24}$/)) {
+              manager = await Employee.findById(managerId);
+            }
+
             if (manager) {
               approver = {
-                id: manager.employeeId,
-                name: manager.fullName,
+                id: String(manager.userRef || manager._id || manager.employeeId || ''),
+                name: toDisplayName(manager),
                 email: manager.email,
                 role: 'Direct Manager'
               };
@@ -112,13 +147,16 @@ async function getApproverByRole(approverRole, requestData) {
         if (requestData.department) {
           const deptHead = await Employee.findOne({
             department: requestData.department,
-            position: { $regex: /head|director|manager/i }
-          }).sort({ position: 1 });
+            $or: [
+              { jobTitle: { $regex: /head|director|manager/i } },
+              { role: { $regex: /head|director|manager/i } },
+            ],
+          }).sort({ updatedAt: -1 });
           
           if (deptHead) {
             approver = {
-              id: deptHead.employeeId,
-              name: deptHead.fullName,
+              id: String(deptHead.userRef || deptHead._id || deptHead.employeeId || ''),
+              name: toDisplayName(deptHead),
               email: deptHead.email,
               role: 'Department Head'
             };
@@ -127,12 +165,19 @@ async function getApproverByRole(approverRole, requestData) {
         break;
 
       case 'Finance Manager': {
-        // Find user with Finance Manager role
-        const financeManager = await User.findOne({ role: 'Finance' });
+        // Find user likely responsible for finance approvals.
+        const financeManager = await User.findOne({
+          $or: [
+            { role: 'Finance Manager' },
+            { role: 'Finance' },
+            { department: { $regex: /^finance$/i } },
+          ],
+          status: 'Active',
+        }).sort({ updatedAt: -1 });
         if (financeManager) {
           approver = {
-            id: financeManager._id,
-            name: financeManager.fullName,
+            id: String(financeManager._id),
+            name: toDisplayName(financeManager),
             email: financeManager.email,
             role: 'Finance Manager'
           };
@@ -141,12 +186,19 @@ async function getApproverByRole(approverRole, requestData) {
       }
 
       case 'HR Director': {
-        // Find user with HR Director role
-        const hrDirector = await User.findOne({ role: 'HR' });
+        // Find user likely responsible for HR approvals.
+        const hrDirector = await User.findOne({
+          $or: [
+            { role: 'HR Director' },
+            { role: 'HR' },
+            { department: { $regex: /^hr$/i } },
+          ],
+          status: 'Active',
+        }).sort({ updatedAt: -1 });
         if (hrDirector) {
           approver = {
-            id: hrDirector._id,
-            name: hrDirector.fullName,
+            id: String(hrDirector._id),
+            name: toDisplayName(hrDirector),
             email: hrDirector.email,
             role: 'HR Director'
           };
@@ -156,11 +208,11 @@ async function getApproverByRole(approverRole, requestData) {
 
       case 'Admin': {
         // Find admin user
-        const admin = await User.findOne({ role: 'Admin' });
+        const admin = await User.findOne({ role: 'Admin', status: 'Active' }).sort({ updatedAt: -1 });
         if (admin) {
           approver = {
-            id: admin._id,
-            name: admin.fullName,
+            id: String(admin._id),
+            name: toDisplayName(admin),
             email: admin.email,
             role: 'Admin'
           };

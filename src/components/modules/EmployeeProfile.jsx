@@ -41,11 +41,13 @@ const EmployeeProfile = ({
   const [mfaBackupCodes, setMfaBackupCodes] = useState(null);
   const [mfaLoading, setMfaLoading] = useState(false);
   const [disablePassword, setDisablePassword] = useState("");
+  const [isResendingEmail, setIsResendingEmail] = useState(false);
 
   // Determine if current user is HR admin
   const isHR = currentUser?.role === "HR" || currentUser?.role === "Admin";
   // Determine if viewing own profile
   const isOwnProfile = !employeeData || employee?._id === currentUser?._id;
+  const isSelfProfileFromAvatar = isOwnProfile && fromProfile;
 
   const tabs = [
     { id: "overview", label: "Overview" },
@@ -420,7 +422,6 @@ const EmployeeProfile = ({
       setValidationErrors({});
 
       const payload = {
-        name: editingEmployee.name,
         email: editingEmployee.email,
         phone: editingEmployee.phone || "",
         dateOfBirth: editingEmployee.dateOfBirth || "",
@@ -429,11 +430,17 @@ const EmployeeProfile = ({
         updatedBy: currentUser?._id || "unknown",
       };
 
+      if (!isSelfProfileFromAvatar) {
+        payload.firstName = editingEmployee.firstName;
+        payload.lastName = editingEmployee.lastName;
+      }
+
       // Only HR can update these fields
       if (isHR) {
         Object.assign(payload, {
           department: editingEmployee.department || "",
           jobTitle: editingEmployee.jobTitle || "",
+          role: editingEmployee.role || "Employee",
           status: editingEmployee.status || "Active",
           salary: editingEmployee.salary || 0,
           paySchedule: editingEmployee.paySchedule || "",
@@ -507,6 +514,22 @@ const EmployeeProfile = ({
     }
   };
 
+  const handleResendVerification = async () => {
+    try {
+      setIsResendingEmail(true);
+      await apiService.auth.resendVerification();
+      toast.success("Verification email sent! Check your inbox.");
+    } catch (error) {
+      toast.error(
+        error.serverData?.error ||
+          error.response?.data?.error ||
+          "Failed to resend verification email",
+      );
+    } finally {
+      setIsResendingEmail(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6">
@@ -551,17 +574,44 @@ const EmployeeProfile = ({
                 <div className="flex flex-col justify-center flex-1">
                   {isEditing ? (
                     <>
-                      <input
-                        type="text"
-                        value={editingEmployee?.name || ""}
-                        onChange={(e) =>
-                          setEditingEmployee({
-                            ...editingEmployee,
-                            name: e.target.value,
-                          })
-                        }
-                        className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded"
-                      />
+                      {isSelfProfileFromAvatar ? (
+                        <div className="mb-2">
+                          <h1 className="text-gray-900 dark:text-white text-2xl md:text-3xl font-bold">
+                            {`${editingEmployee?.firstName || ""} ${editingEmployee?.lastName || ""}`.trim() ||
+                              "Unnamed Employee"}
+                          </h1>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Name is managed from your signup account details.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2 mb-2">
+                          <input
+                            type="text"
+                            placeholder="First Name"
+                            value={editingEmployee?.firstName || ""}
+                            onChange={(e) =>
+                              setEditingEmployee({
+                                ...editingEmployee,
+                                firstName: e.target.value,
+                              })
+                            }
+                            className="w-full text-2xl md:text-3xl font-bold text-gray-900 dark:text-white px-2 py-1 border border-gray-300 dark:border-gray-600 rounded input-focus"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Last Name"
+                            value={editingEmployee?.lastName || ""}
+                            onChange={(e) =>
+                              setEditingEmployee({
+                                ...editingEmployee,
+                                lastName: e.target.value,
+                              })
+                            }
+                            className="w-full text-2xl md:text-3xl font-bold text-gray-900 dark:text-white px-2 py-1 border border-gray-300 dark:border-gray-600 rounded input-focus"
+                          />
+                        </div>
+                      )}
                       {isHR && (
                         <input
                           type="text"
@@ -579,7 +629,8 @@ const EmployeeProfile = ({
                   ) : (
                     <>
                       <h1 className="text-gray-900 dark:text-white text-2xl md:text-3xl font-bold">
-                        {employee?.name}
+                        {`${employee?.firstName || ""} ${employee?.lastName || ""}`.trim() ||
+                          "Unnamed Employee"}
                       </h1>
                       <p className="text-gray-500 dark:text-gray-400 text-base">
                         {employee?.jobTitle}
@@ -707,6 +758,33 @@ const EmployeeProfile = ({
                       ) : (
                         <p className="text-gray-900 dark:text-gray-200 text-sm font-medium">
                           {employee?.email}
+                          {isOwnProfile &&
+                            currentUser?.isEmailVerified !== undefined && (
+                              <span className="ml-2 inline-flex items-center gap-1.5 align-middle">
+                                {currentUser?.isEmailVerified ? (
+                                  <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                                    <i className="fa-solid fa-check-circle text-green-500"></i>{" "}
+                                    Verified
+                                  </span>
+                                ) : (
+                                  <>
+                                    <span className="inline-flex items-center rounded-md bg-yellow-50 px-2 py-1 text-xs font-medium text-yellow-800 ring-1 ring-inset ring-yellow-600/20">
+                                      <i className="fa-solid fa-triangle-exclamation text-yellow-500"></i>{" "}
+                                      Unverified
+                                    </span>
+                                    <button
+                                      onClick={handleResendVerification}
+                                      disabled={isResendingEmail}
+                                      className="ml-1 text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium disabled:opacity-50"
+                                    >
+                                      {isResendingEmail
+                                        ? "Sending..."
+                                        : "Resend Verification email"}
+                                    </button>
+                                  </>
+                                )}
+                              </span>
+                            )}
                         </p>
                       )}
                     </div>
@@ -1676,6 +1754,34 @@ const EmployeeProfile = ({
                   </div>
 
                   <div className="space-y-4">
+                    <div>
+                      <p className="text-gray-500 dark:text-gray-400 text-xs font-medium uppercase tracking-wider mb-1">
+                        System Role
+                      </p>
+                      {isEditing && isHR ? (
+                        <select
+                          name="role"
+                          value={editingEmployee?.role || "Employee"}
+                          onChange={(e) =>
+                            setEditingEmployee({
+                              ...editingEmployee,
+                              role: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded text-sm dark:bg-gray-700 dark:text-white"
+                        >
+                          <option value="Employee">Employee</option>
+                          <option value="HR">HR</option>
+                          <option value="Manager">Manager</option>
+                          <option value="Admin">Admin</option>
+                        </select>
+                      ) : (
+                        <p className="text-gray-900 dark:text-gray-200 text-sm font-medium">
+                          {employee?.role || "Employee"}
+                        </p>
+                      )}
+                    </div>
+
                     <div>
                       <p className="text-gray-500 dark:text-gray-400 text-xs font-medium uppercase tracking-wider mb-1">
                         Job Title

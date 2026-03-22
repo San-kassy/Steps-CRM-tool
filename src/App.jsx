@@ -3,6 +3,7 @@ import { useAuth } from "./context/useAuth";
 import Login from "./components/auth/Login";
 import Signup from "./components/auth/Signup";
 import ForgotPassword from "./components/auth/ForgotPassword";
+import VerifyEmail from "./components/auth/VerifyEmail";
 import Home from "./home/Home";
 import Profile from "./components/Profile";
 import Settings from "./components/Settings";
@@ -32,6 +33,7 @@ function App() {
         <Route path="/" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/visitor/:token" element={<VisitorSignIn />} />
 
         <Route

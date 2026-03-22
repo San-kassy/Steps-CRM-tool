@@ -13,6 +13,24 @@ const EmployeePayrollSchema = new mongoose.Schema({
   department: {
     type: String
   },
+  paySchedule: {
+    type: String,
+    enum: ['Monthly', 'Semi-monthly', 'Bi-weekly', 'Weekly'],
+  },
+  // Salary-based fields (from employee profile)
+  baseSalary: {
+    type: Number,
+    default: 0
+  },
+  bonus: {
+    type: Number,
+    default: 0
+  },
+  allowances: {
+    type: Number,
+    default: 0
+  },
+  // Hours-based fields (for hourly workers / manual adjustments)
   regularHours: {
     type: Number,
     default: 0
@@ -82,7 +100,7 @@ const PayrollRunSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Calculate missing amounts like Net Pay for every employee BEFORE validating/saving
+// Calculate gross/net pay for every employee BEFORE validating/saving
 PayrollRunSchema.pre('validate', function(next) {
     if (!this.employees) return next();
 
@@ -91,24 +109,32 @@ PayrollRunSchema.pre('validate', function(next) {
     let totalNet = 0;
 
     const { taxRate, pensionRate, healthInsurance, otherDeductions } = this.deductions || {};
-    // Let's assume tax & pension are percentages, while health and other are flat amounts per employee. Or we can just calculate them as values.
-    // To match Payroll.jsx's likely math: tax is usually % of gross. Pension % of gross.
 
     this.employees.forEach(emp => {
-      // Recalculate gross if missing
-      emp.grossPay = 
-        (emp.regularHours * (this.payRates.regularRate || 0)) + 
-        (emp.overtime * (this.payRates.overtimeRate || 0)) +
-        (emp.commission || 0);
+      // Prefer salary-based calculation if baseSalary is set on the employee profile.
+      // Fall back to hours-based calculation for hourly/manual workers.
+      const hasSalary = (emp.baseSalary || 0) > 0;
+
+      if (hasSalary) {
+        // Salary-based gross: base salary + bonus + allowances
+        emp.grossPay = (emp.baseSalary || 0) + (emp.bonus || 0) + (emp.allowances || 0);
+      } else {
+        // Hours-based gross: regularHours * rate + overtime * overtimeRate + commission
+        emp.grossPay =
+          (emp.regularHours || 0) * (this.payRates.regularRate || 0) +
+          (emp.overtime || 0) * (this.payRates.overtimeRate || 0) +
+          (emp.commission || 0);
+      }
+
       totalGross += emp.grossPay;
 
-      // Calculate deductibles
+      // Deductions: tax & pension are % of gross; health & other are flat per-employee amounts
       const empTax = emp.grossPay * ((taxRate || 0) / 100);
       const empPension = emp.grossPay * ((pensionRate || 0) / 100);
       const empTotalDeductions = empTax + empPension + (healthInsurance || 0) + (otherDeductions || 0);
-      
+
       emp.netPay = emp.grossPay - empTotalDeductions;
-      
+
       totalDeductions += empTotalDeductions;
       totalNet += emp.netPay;
     });

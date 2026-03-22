@@ -8,7 +8,7 @@ const API_BASE_URL =
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 20000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -84,6 +84,12 @@ export const apiService = {
   put: (url, data, config) => api.put(url, data, config),
   patch: (url, data, config) => api.patch(url, data, config),
   delete: (url, config) => api.delete(url, config),
+
+  // Auth endpoints
+  auth: {
+    verifyEmail: (token) => api.get(`/api/auth/verify-email/${token}`),
+    resendVerification: () => api.post('/api/auth/resend-verification'),
+  },
 
   // Module-specific endpoints
   attendance: {

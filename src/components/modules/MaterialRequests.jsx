@@ -108,8 +108,6 @@ const MaterialRequests = () => {
   const { departments: _departments, loading: _departmentsLoading } =
     useDepartments();
 
-  const previousStateRef = useRef(null);
-
   const getAttachmentName = (file) => {
     if (!file) return "Attachment";
     if (typeof file === "string") return file;
@@ -331,6 +329,42 @@ const MaterialRequests = () => {
     }
   };
 
+  const getBlankFormData = useCallback(
+    () => ({
+      requestType: "",
+      approver: "",
+      department: "",
+      requestTitle: "",
+      requiredByDate: "",
+      budgetCode: "",
+      reason: "",
+      currency: appCurrency || "NGN",
+      exchangeRate: "",
+    }),
+    [appCurrency],
+  );
+
+  const getBlankLineItems = () => [
+    {
+      itemName: "",
+      quantity: "",
+      quantityType: "",
+      amount: "",
+      description: "",
+    },
+  ];
+
+  const resetCreateForm = useCallback(() => {
+    setIsEditMode(false);
+    setSelectedRequest(null);
+    setFormData(getBlankFormData());
+    setLineItems(getBlankLineItems());
+    setAttachments([]);
+    setMessage("");
+    setShowFormMentionDropdown(false);
+    setFormMentionSearch("");
+  }, [getBlankFormData]);
+
   useEffect(() => {
     fetchRequests();
     fetchUsers();
@@ -338,21 +372,8 @@ const MaterialRequests = () => {
     fetchCurrencies();
     fetchSkuItems();
 
-    // Restore state from localStorage on mount
-    const savedState = localStorage.getItem("materialRequestsState");
-    if (savedState) {
-      try {
-        const parsed = JSON.parse(savedState);
-        if (parsed.showForm !== undefined) setShowForm(parsed.showForm);
-        if (parsed.filterStatus) setFilterStatus(parsed.filterStatus);
-        if (parsed.formData) setFormData(parsed.formData);
-        if (parsed.lineItems) setLineItems(parsed.lineItems);
-        if (parsed.message) setMessage(parsed.message);
-        // Note: attachments (File objects) cannot be stored in localStorage
-      } catch {
-        // Ignore parsing errors for localStorage
-      }
-    }
+    // Keep create flow fresh: clear legacy persisted in-progress form state.
+    localStorage.removeItem("materialRequestsState");
   }, [fetchCurrencies]);
 
   // Close dropdown when clicking outside
@@ -366,25 +387,6 @@ const MaterialRequests = () => {
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
   }, [activeDropdown]);
-
-  // Save state to localStorage only when it actually changes
-  useEffect(() => {
-    const stateToSave = {
-      showForm,
-      filterStatus,
-      formData,
-      lineItems,
-      message,
-    };
-
-    const stateString = JSON.stringify(stateToSave);
-
-    // Only save if state has actually changed
-    if (previousStateRef.current !== stateString) {
-      previousStateRef.current = stateString;
-      localStorage.setItem("materialRequestsState", stateString);
-    }
-  }, [showForm, filterStatus, formData, lineItems, message]);
 
   const fetchRequests = async () => {
     try {
@@ -624,11 +626,99 @@ const MaterialRequests = () => {
     setActiveDropdown(null);
   };
 
+  const getCurrentPendingApprover = (request) => {
+    if (!request) return null;
+    if (
+      Array.isArray(request.approvalChain) &&
+      request.approvalChain.length > 0
+    ) {
+      return (
+        request.approvalChain.find((step) => step?.status === "pending") || null
+      );
+    }
+    return null;
+  };
+
   const isUserApprover = (request) => {
+    const currentStep = getCurrentPendingApprover(request);
+    const currentUserId = String(user?._id || "");
+    const currentUserEmail = String(
+      user?.primaryEmailAddress?.emailAddress || user?.email || "",
+    )
+      .toLowerCase()
+      .trim();
+    const currentUserName = String(user?.fullName || "")
+      .toLowerCase()
+      .trim();
+
+    if (currentStep) {
+      return (
+        (currentStep.approverId &&
+          String(currentStep.approverId).trim() === currentUserId) ||
+        (currentStep.approverEmail &&
+          String(currentStep.approverEmail).toLowerCase().trim() ===
+            currentUserEmail) ||
+        (currentStep.approverName &&
+          String(currentStep.approverName).toLowerCase().trim() ===
+            currentUserName)
+      );
+    }
+
     return (
-      user?.fullName === request.approver ||
-      user?.primaryEmailAddress?.emailAddress === request.approverEmail
+      String(user?.fullName || "")
+        .toLowerCase()
+        .trim() ===
+        String(request?.approver || "")
+          .toLowerCase()
+          .trim() ||
+      currentUserEmail ===
+        String(request?.approverEmail || "")
+          .toLowerCase()
+          .trim()
     );
+  };
+
+  const submitViewComment = async () => {
+    const pendingComment = String(viewComment || "").trim();
+    if (!pendingComment || submittingComment || !selectedRequest?._id) return;
+
+    setSubmittingComment(true);
+    setViewComment("");
+    try {
+      const response = await apiService.post(
+        `/api/material-requests/${selectedRequest._id}/comments`,
+        {
+          text: pendingComment,
+          author: user.fullName,
+          authorId: user._id,
+        },
+      );
+
+      const updatedRequest = response?.data || response;
+      if (updatedRequest?._id) {
+        setSelectedRequest(updatedRequest);
+        setRequests((prev) =>
+          prev.map((request) =>
+            request._id === updatedRequest._id ? updatedRequest : request,
+          ),
+        );
+      } else {
+        const res = await apiService.get("/api/material-requests");
+        const allReqs = res.data || res || [];
+        setRequests(allReqs);
+        const refreshed = allReqs.find((r) => r._id === selectedRequest._id);
+        if (refreshed) setSelectedRequest(refreshed);
+      }
+      setShowViewMentionDropdown(false);
+    } catch (err) {
+      setViewComment(pendingComment);
+      toast.error(
+        "Failed to post comment: " +
+          (err?.response?.data?.message || err?.message || "Unknown error"),
+      );
+    } finally {
+      setSubmittingComment(false);
+    }
   };
 
   const canUserEdit = (request) => {
@@ -910,8 +1000,7 @@ const MaterialRequests = () => {
                 onClick: (e) => {
                   e.preventDefault();
                   setShowForm(false);
-                  setIsEditMode(false);
-                  setSelectedRequest(null);
+                  resetCreateForm();
                 },
               }),
             },
@@ -940,11 +1029,7 @@ const MaterialRequests = () => {
               </div>
               <button
                 onClick={() => {
-                  setFormData((prev) => ({
-                    ...prev,
-                    currency: appCurrency,
-                    exchangeRate: "",
-                  }));
+                  resetCreateForm();
                   setShowForm(true);
                 }}
                 className="px-4 py-2 bg-[#137fec] text-white rounded-lg hover:bg-[#0d6efd] transition-colors flex items-center gap-2 font-medium"
@@ -1774,8 +1859,7 @@ const MaterialRequests = () => {
                   type="button"
                   onClick={() => {
                     setShowForm(false);
-                    setIsEditMode(false);
-                    setSelectedRequest(null);
+                    resetCreateForm();
                   }}
                   className="w-full sm:w-auto px-6 py-2.5 rounded-lg text-sm font-bold text-[#617589] hover:bg-gray-100 hover:text-[#111418] transition-colors"
                 >
@@ -2903,38 +2987,7 @@ const MaterialRequests = () => {
                                 !showViewMentionDropdown
                               ) {
                                 e.preventDefault();
-                                if (!viewComment.trim() || submittingComment)
-                                  return;
-                                setSubmittingComment(true);
-                                try {
-                                  await apiService.post(
-                                    `/api/material-requests/${selectedRequest._id}/comments`,
-                                    {
-                                      text: viewComment.trim(),
-                                      author: user.fullName,
-                                      authorId: user._id,
-                                    },
-                                  );
-                                  setViewComment("");
-                                  setShowViewMentionDropdown(false);
-                                  const res = await apiService.get(
-                                    "/api/material-requests",
-                                  );
-                                  const allReqs = res.data || res || [];
-                                  setRequests(allReqs);
-                                  const updated = allReqs.find(
-                                    (r) => r._id === selectedRequest._id,
-                                  );
-                                  if (updated) setSelectedRequest(updated);
-                                } catch (err) {
-                                  toast.error(
-                                    "Failed to post comment: " +
-                                      (err?.response?.data?.error ||
-                                        err.message),
-                                  );
-                                } finally {
-                                  setSubmittingComment(false);
-                                }
+                                await submitViewComment();
                               }
                             }}
                           />
@@ -3018,41 +3071,7 @@ const MaterialRequests = () => {
                               disabled={
                                 !viewComment.trim() || submittingComment
                               }
-                              onClick={async () => {
-                                if (!viewComment.trim() || submittingComment)
-                                  return;
-                                setSubmittingComment(true);
-                                try {
-                                  await apiService.post(
-                                    `/api/material-requests/${selectedRequest._id}/comments`,
-                                    {
-                                      text: viewComment.trim(),
-                                      author: user.fullName,
-                                      authorId: user._id,
-                                    },
-                                  );
-                                  setViewComment("");
-                                  setShowViewMentionDropdown(false);
-                                  // Refresh request data
-                                  const res = await apiService.get(
-                                    "/api/material-requests",
-                                  );
-                                  const allReqs = res.data || res || [];
-                                  setRequests(allReqs);
-                                  const updated = allReqs.find(
-                                    (r) => r._id === selectedRequest._id,
-                                  );
-                                  if (updated) setSelectedRequest(updated);
-                                } catch (err) {
-                                  toast.error(
-                                    "Failed to post comment: " +
-                                      (err?.response?.data?.error ||
-                                        err.message),
-                                  );
-                                } finally {
-                                  setSubmittingComment(false);
-                                }
-                              }}
+                              onClick={submitViewComment}
                               className="flex h-8 cursor-pointer items-center justify-center gap-2 rounded-lg bg-[#137fec] hover:bg-[#0d6efd] disabled:opacity-50 disabled:cursor-not-allowed px-4 text-white transition-colors text-xs font-bold shadow-sm"
                             >
                               {submittingComment ? (

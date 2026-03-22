@@ -328,25 +328,31 @@ const HRM = () => {
 
   const approveLeave = async (id) => {
     try {
-      await apiService.post(`/api/hr/leave-requests/${id}/approve`);
+      const response = await apiService.post(
+        `/api/hr/leave-requests/${id}/approve`,
+      );
       setLeaveRequests((prev) =>
         prev.map((l) => (l.id === id ? { ...l, status: "approved" } : l)),
       );
-      toast.success("Leave approved");
-    } catch {
-      toast.error("Failed to approve");
+      toast.success(response?.message || "Leave approved");
+      fetchAll();
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Failed to approve");
     }
   };
 
   const rejectLeave = async (id) => {
     try {
-      await apiService.post(`/api/hr/leave-requests/${id}/reject`);
+      const response = await apiService.post(
+        `/api/hr/leave-requests/${id}/reject`,
+      );
       setLeaveRequests((prev) =>
         prev.map((l) => (l.id === id ? { ...l, status: "rejected" } : l)),
       );
-      toast.success("Leave rejected");
-    } catch {
-      toast.error("Failed to reject");
+      toast.success(response?.message || "Leave rejected");
+      fetchAll();
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Failed to reject");
     }
   };
 
@@ -964,18 +970,28 @@ const HRM = () => {
                             <p className="text-xs text-slate-500">
                               {lr.type} • {lr.range}
                             </p>
+                            {(lr.currentApprover || lr.currentApproverRole) && (
+                              <p className="text-[11px] text-blue-600 mt-0.5">
+                                Awaiting: {lr.currentApprover || "Approver"}
+                                {lr.currentApproverRole
+                                  ? ` (${lr.currentApproverRole})`
+                                  : ""}
+                              </p>
+                            )}
                           </div>
                         </div>
                         <div className="flex gap-2 w-full">
                           <button
                             onClick={() => rejectLeave(lr.id)}
-                            className="flex-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-bold py-1.5 rounded transition-colors"
+                            disabled={!lr.canAct}
+                            className="flex-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-bold py-1.5 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             Reject
                           </button>
                           <button
                             onClick={() => approveLeave(lr.id)}
-                            className="flex-1 bg-primary hover:bg-blue-600 text-white text-xs font-bold py-1.5 rounded transition-colors"
+                            disabled={!lr.canAct}
+                            className="flex-1 bg-primary hover:bg-blue-600 text-white text-xs font-bold py-1.5 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             Approve
                           </button>

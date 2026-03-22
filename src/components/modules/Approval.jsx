@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../context/useAuth";
 import { apiService } from "../../services/api";
 import toast from "react-hot-toast";
@@ -83,18 +83,29 @@ const Approval = () => {
 
   // Get current user's info
   const currentUserName = user?.fullName || "Current User";
-  const currentUserId = user?.id || "user_current";
+  const currentUserId = user?.id || user?._id || user?.userId || "";
   const currentEmployeeId = user?.publicMetadata?.employeeId || "EMP999";
   const currentDepartment = user?.publicMetadata?.department || "General";
+  const hasFetchedStaffRef = useRef(false);
+
+  const extractList = (response) => {
+    if (Array.isArray(response)) return response;
+    if (Array.isArray(response?.data)) return response.data;
+    if (Array.isArray(response?.employees)) return response.employees;
+    return [];
+  };
 
   // Fetch staff list for approver selection
   useEffect(() => {
     const fetchStaffList = async () => {
       try {
-        const response = await apiService.get("/api/hr/employees");
-        if (response && Array.isArray(response)) {
+        const response = await apiService.get("/api/hr/employees", {
+          timeout: 20000,
+        });
+        const employees = extractList(response);
+        if (employees.length > 0) {
           _setStaffList(
-            response.map((emp) => ({
+            employees.map((emp) => ({
               id: emp._id || emp.id,
               name: emp.fullName || emp.name,
               email: emp.email,
@@ -107,6 +118,8 @@ const Approval = () => {
       }
     };
 
+    if (hasFetchedStaffRef.current) return;
+    hasFetchedStaffRef.current = true;
     fetchStaffList();
   }, []);
 
@@ -238,18 +251,45 @@ const Approval = () => {
 
   // Fetch data from MongoDB
   const fetchData = async () => {
+    if (!currentUserId) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
-      const [advanceRes, refundRes, retirementRes] = await Promise.all([
-        apiService.get(`/api/advance-requests?userId=${currentUserId}`),
-        apiService.get(`/api/refund-requests?userId=${currentUserId}`),
-        apiService.get(`/api/retirement-breakdown?userId=${currentUserId}`),
+      const [advanceRes, refundRes, retirementRes] = await Promise.allSettled([
+        apiService.get(`/api/advance-requests?userId=${currentUserId}`, {
+          timeout: 20000,
+        }),
+        apiService.get(`/api/refund-requests?userId=${currentUserId}`, {
+          timeout: 20000,
+        }),
+        apiService.get(`/api/retirement-breakdown?userId=${currentUserId}`, {
+          timeout: 20000,
+        }),
       ]);
-      setAdvanceRequests(Array.isArray(advanceRes) ? advanceRes : []);
-      setRefundRequests(Array.isArray(refundRes) ? refundRes : []);
-      setRetirementBreakdowns(
-        Array.isArray(retirementRes) ? retirementRes : [],
-      );
+
+      const nextAdvance =
+        advanceRes.status === "fulfilled" ? extractList(advanceRes.value) : [];
+      const nextRefund =
+        refundRes.status === "fulfilled" ? extractList(refundRes.value) : [];
+      const nextRetirement =
+        retirementRes.status === "fulfilled"
+          ? extractList(retirementRes.value)
+          : [];
+
+      setAdvanceRequests(nextAdvance);
+      setRefundRequests(nextRefund);
+      setRetirementBreakdowns(nextRetirement);
+
+      if (
+        advanceRes.status === "rejected" ||
+        refundRes.status === "rejected" ||
+        retirementRes.status === "rejected"
+      ) {
+        toast.error("Some approval data failed to load");
+      }
     } catch (error) {
       console.error("Error fetching data:", error);
       toast.error("Failed to load requests");

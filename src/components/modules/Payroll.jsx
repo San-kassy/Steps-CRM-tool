@@ -96,36 +96,31 @@ const Payroll = ({ onBack }) => {
   const fetchEmployees = async () => {
     try {
       setLoading(true);
-      const response = await apiService.get("/api/hr/employees");
-      const employeeData = Array.isArray(response)
-        ? response
-        : response.data || [];
+      // Use the /prepare endpoint which reads salary data from employee profiles
+      const params = selectedPeriod.paymentSchedule
+        ? `?paymentSchedule=${encodeURIComponent(selectedPeriod.paymentSchedule)}`
+        : "";
+      const response = await apiService.get(`/api/payroll/prepare${params}`);
+      const employeeData = response?.data || response || [];
 
-      // Transform employee data for payroll
-      const payrollEmployees = employeeData.map((emp) => {
-        const regularHours = 80.0;
-        const overtime = 0.0;
-        const commission = 0.0;
-        const grossPay =
-          regularHours * payRates.regularRate +
-          overtime * payRates.overtimeRate +
-          commission;
-
-        return {
-          id: emp._id || emp.id,
-          name:
-            `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || emp.email,
-          initials: getInitials(emp.firstName, emp.lastName),
-          color: getRandomColor(),
-          regularHours,
-          overtime,
-          commission,
-          grossPay,
-          status: "Ready",
-          statusColor: "green",
-          department: emp.department,
-        };
-      });
+      const payrollEmployees = (Array.isArray(employeeData) ? employeeData : []).map((emp) => ({
+        id: emp.id || emp._id,
+        name: emp.name,
+        initials: getInitials(...(emp.name || "").split(" ")),
+        color: getRandomColor(),
+        department: emp.department || "",
+        paySchedule: emp.paySchedule || null,
+        baseSalary: emp.baseSalary || 0,
+        bonus: emp.bonus || 0,
+        allowances: emp.allowances || 0,
+        regularHours: emp.regularHours || 0,
+        overtime: emp.overtime || 0,
+        commission: emp.commission || 0,
+        grossPay: emp.grossPay || 0,
+        status: emp.status || "Incomplete",
+        statusColor: emp.status === "Ready" ? "green" : "amber",
+        warning: emp.status === "Incomplete",
+      }));
 
       setEmployees(payrollEmployees);
     } catch (error) {
@@ -148,9 +143,9 @@ const Payroll = ({ onBack }) => {
     return colors[Math.floor(Math.random() * colors.length)];
   };
 
-  // Calculate employees with missing hours
+  // Calculate employees with missing/incomplete salary info
   const getMissingHoursCount = () => {
-    return employees.filter((emp) => emp.regularHours < 80).length;
+    return employees.filter((emp) => emp.status === "Incomplete" || emp.warning).length;
   };
 
   // Calculate end date based on start date and payment schedule
@@ -206,7 +201,9 @@ const Payroll = ({ onBack }) => {
   const handleEditEmployee = (employee) => {
     setEditingEmployee({
       ...employee,
-      tempRegularHours: employee.regularHours,
+      tempBaseSalary: employee.baseSalary,
+      tempBonus: employee.bonus,
+      tempAllowances: employee.allowances,
       tempOvertime: employee.overtime,
       tempCommission: employee.commission,
     });
@@ -219,25 +216,28 @@ const Payroll = ({ onBack }) => {
 
     const updatedEmployees = employees.map((emp) => {
       if (emp.id === editingEmployee.id) {
-        const regularHours = parseFloat(editingEmployee.tempRegularHours) || 0;
+        const baseSalary = parseFloat(editingEmployee.tempBaseSalary) || 0;
+        const bonus = parseFloat(editingEmployee.tempBonus) || 0;
+        const allowances = parseFloat(editingEmployee.tempAllowances) || 0;
         const overtime = parseFloat(editingEmployee.tempOvertime) || 0;
         const commission = parseFloat(editingEmployee.tempCommission) || 0;
 
-        // Calculate gross pay using configurable rates
-        const grossPay =
-          regularHours * payRates.regularRate +
-          overtime * payRates.overtimeRate +
-          commission;
+        // Salary-based gross pay: base + bonus + allowances + overtime adjustment
+        const overtimePay = overtime * payRates.overtimeRate;
+        const grossPay = baseSalary + bonus + allowances + overtimePay + commission;
+        const isReady = baseSalary > 0;
 
         return {
           ...emp,
-          regularHours,
+          baseSalary,
+          bonus,
+          allowances,
           overtime,
           commission,
           grossPay,
-          status: regularHours >= 80 ? "Ready" : "Incomplete",
-          statusColor: regularHours >= 80 ? "green" : "amber",
-          warning: regularHours < 80,
+          status: isReady ? "Ready" : "Incomplete",
+          statusColor: isReady ? "green" : "amber",
+          warning: !isReady,
         };
       }
       return emp;
@@ -246,7 +246,7 @@ const Payroll = ({ onBack }) => {
     setEmployees(updatedEmployees);
     setShowEditModal(false);
     setEditingEmployee(null);
-    toast.success("Employee details updated successfully");
+    toast.success("Employee payroll details updated!");
   };
 
   // Cancel edit
@@ -806,17 +806,20 @@ const Payroll = ({ onBack }) => {
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
-                          <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider w-[240px]">
+                          <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider w-[220px]">
                             Employee
                           </th>
                           <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">
-                            Reg. Hours
+                            Pay Schedule
                           </th>
                           <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">
-                            Overtime
+                            Base Salary
                           </th>
                           <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">
-                            Commission
+                            Bonus
+                          </th>
+                          <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">
+                            Allowances
                           </th>
                           <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">
                             Gross Pay
@@ -852,38 +855,32 @@ const Payroll = ({ onBack }) => {
                                   <p className="text-sm font-bold text-slate-900 dark:text-white">
                                     {employee.name}
                                   </p>
-                                  <p className="text-xs text-gray-500 font-mono">
-                                    ID: {employee.id}
+                                  <p className="text-xs text-gray-500">
+                                    {employee.department || "—"}
                                   </p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-6 py-4 font-mono text-sm text-gray-700 dark:text-gray-300">
-                              {employee.warning ? (
-                                <>
-                                  <span className="text-amber-600 font-bold">
-                                    {employee.regularHours.toFixed(2)}
-                                  </span>
-                                  <span className="text-xs text-gray-400 ml-1">
-                                    /80
-                                  </span>
-                                </>
+                            <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">
+                              {employee.paySchedule ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-medium">
+                                  {employee.paySchedule}
+                                </span>
                               ) : (
-                                employee.regularHours.toFixed(2)
+                                <span className="text-gray-400 text-xs">Not set</span>
                               )}
                             </td>
                             <td className="px-6 py-4 font-mono text-sm text-gray-700 dark:text-gray-300">
-                              {employee.overtime.toFixed(2)}
+                              {hideAmounts ? "****" : formatCurrency(employee.baseSalary)}
                             </td>
                             <td className="px-6 py-4 font-mono text-sm text-gray-700 dark:text-gray-300">
-                              {hideAmounts
-                                ? "****"
-                                : formatCurrency(employee.commission)}
+                              {hideAmounts ? "****" : formatCurrency(employee.bonus)}
+                            </td>
+                            <td className="px-6 py-4 font-mono text-sm text-gray-700 dark:text-gray-300">
+                              {hideAmounts ? "****" : formatCurrency(employee.allowances)}
                             </td>
                             <td className="px-6 py-4 font-mono text-sm font-bold text-slate-900 dark:text-white">
-                              {hideAmounts
-                                ? "****"
-                                : formatCurrency(employee.grossPay)}
+                              {hideAmounts ? "****" : formatCurrency(employee.grossPay)}
                             </td>
                             <td className="px-6 py-4">
                               <span
@@ -901,13 +898,13 @@ const Payroll = ({ onBack }) => {
                                 onClick={() => handleEditEmployee(employee)}
                                 className={`p-1 rounded transition-colors ${
                                   employee.warning
-                                    ? "text-blue-600 hover:text-blue-700 bg-blue-100/50"
+                                    ? "text-amber-600 hover:text-amber-700 bg-amber-100/50"
                                     : "text-gray-400 hover:text-blue-600 hover:bg-gray-100 dark:hover:bg-gray-700"
                                 }`}
                                 title={
                                   employee.warning
-                                    ? "Complete time logs"
-                                    : "Edit employee details"
+                                    ? "Salary is missing – click to update"
+                                    : "Edit payroll details"
                                 }
                               >
                                 <i className="fa-solid fa-pen-to-square text-lg"></i>
@@ -1293,173 +1290,180 @@ const Payroll = ({ onBack }) => {
 
             {/* Modal Body */}
             <div className="p-6 space-y-6">
-              {/* Warning if hours incomplete */}
-              {editingEmployee.regularHours < 80 && (
+              {/* Warning if no base salary */}
+              {!parseFloat(editingEmployee.tempBaseSalary) && (
                 <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800 p-4">
                   <div className="flex items-start gap-3">
                     <i className="fa-solid fa-triangle-exclamation text-amber-600 dark:text-amber-400"></i>
                     <div>
                       <h4 className="text-sm font-bold text-amber-900 dark:text-amber-200">
-                        Incomplete Time Logs
+                        Base Salary Missing
                       </h4>
                       <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">
-                        This employee has less than 80 regular hours. Please
-                        update time logs or add a note.
+                        This employee has no base salary on their profile. Enter it below or update it in the employee profile.
                       </p>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Regular Hours */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Regular Hours
-                  <span className="text-gray-500 font-normal ml-2">
-                    (Standard: 80 hours)
-                  </span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    max="160"
-                    value={editingEmployee.tempRegularHours}
-                    onChange={(e) =>
-                      setEditingEmployee({
-                        ...editingEmployee,
-                        tempRegularHours: e.target.value,
-                      })
-                    }
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-mono text-lg"
-                  />
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-                    hrs
-                  </span>
+              {/* Pay Schedule (read-only, from profile) */}
+              {editingEmployee.paySchedule && (
+                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                  <i className="fa-solid fa-calendar-days"></i>
+                  <span>Pay Schedule: <strong className="text-slate-900 dark:text-white">{editingEmployee.paySchedule}</strong></span>
                 </div>
-                {parseFloat(editingEmployee.tempRegularHours) < 80 && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                    <i className="fa-solid fa-info-circle mr-1"></i>
-                    {80 - parseFloat(editingEmployee.tempRegularHours)} hours
-                    short of standard
-                  </p>
-                )}
-              </div>
+              )}
 
-              {/* Overtime Hours */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Overtime Hours
-                  <span className="text-gray-500 font-normal ml-2">
-                    (1.5x pay rate)
-                  </span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    max="40"
-                    value={editingEmployee.tempOvertime}
-                    onChange={(e) =>
-                      setEditingEmployee({
-                        ...editingEmployee,
-                        tempOvertime: e.target.value,
-                      })
-                    }
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-mono text-lg"
-                  />
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-                    hrs
-                  </span>
+              {/* Salary Breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Base Salary */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Base Salary
+                    <span className="text-xs text-gray-400 font-normal ml-1">(from profile)</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">₦</span>
+                    <input
+                      type="number"
+                      step="1000"
+                      min="0"
+                      value={editingEmployee.tempBaseSalary}
+                      onChange={(e) =>
+                        setEditingEmployee({ ...editingEmployee, tempBaseSalary: e.target.value })
+                      }
+                      className="w-full pl-7 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-mono"
+                    />
+                  </div>
                 </div>
-              </div>
 
-              {/* Commission */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Commission / Bonus
-                  <span className="text-gray-500 font-normal ml-2">
-                    (Optional)
-                  </span>
-                </label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">
-                    ₦
-                  </span>
-                  <input
-                    type="number"
-                    step="1000"
-                    min="0"
-                    value={editingEmployee.tempCommission}
-                    onChange={(e) =>
-                      setEditingEmployee({
-                        ...editingEmployee,
-                        tempCommission: e.target.value,
-                      })
-                    }
-                    className="w-full pl-8 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-mono text-lg"
-                  />
+                {/* Bonus */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Bonus
+                    <span className="text-xs text-gray-400 font-normal ml-1">(from profile)</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">₦</span>
+                    <input
+                      type="number"
+                      step="500"
+                      min="0"
+                      value={editingEmployee.tempBonus}
+                      onChange={(e) =>
+                        setEditingEmployee({ ...editingEmployee, tempBonus: e.target.value })
+                      }
+                      className="w-full pl-7 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* Allowances */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Allowances
+                    <span className="text-xs text-gray-400 font-normal ml-1">(from profile)</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">₦</span>
+                    <input
+                      type="number"
+                      step="500"
+                      min="0"
+                      value={editingEmployee.tempAllowances}
+                      onChange={(e) =>
+                        setEditingEmployee({ ...editingEmployee, tempAllowances: e.target.value })
+                      }
+                      className="w-full pl-7 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-mono"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Calculated Gross Pay Preview */}
+              {/* Optional adjustments */}
+              <div className="border-t border-gray-100 dark:border-gray-700 pt-5">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Optional Adjustments</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Overtime */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Overtime Hours
+                      <span className="text-gray-400 font-normal ml-1 text-xs">(× ₦{payRates.overtimeRate}/hr)</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        value={editingEmployee.tempOvertime}
+                        onChange={(e) =>
+                          setEditingEmployee({ ...editingEmployee, tempOvertime: e.target.value })
+                        }
+                        className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-mono"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">hrs</span>
+                    </div>
+                  </div>
+
+                  {/* Extra Commission */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Extra Commission
+                      <span className="text-gray-400 font-normal ml-1 text-xs">(one-time)</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">₦</span>
+                      <input
+                        type="number"
+                        step="1000"
+                        min="0"
+                        value={editingEmployee.tempCommission}
+                        onChange={(e) =>
+                          setEditingEmployee({ ...editingEmployee, tempCommission: e.target.value })
+                        }
+                        className="w-full pl-7 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Live Gross Pay Preview */}
               <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 p-4">
-                <h4 className="text-sm font-bold text-blue-900 dark:text-blue-200 mb-3">
-                  Gross Pay Calculation
-                </h4>
+                <h4 className="text-sm font-bold text-blue-900 dark:text-blue-200 mb-3">Gross Pay Breakdown</h4>
                 <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-blue-800 dark:text-blue-300">
-                      Regular:{" "}
-                      {parseFloat(
-                        editingEmployee.tempRegularHours || 0,
-                      ).toFixed(2)}{" "}
-                      hrs × ₦{payRates.regularRate}
-                    </span>
-                    <span className="font-mono text-blue-900 dark:text-blue-100">
-                      {formatCurrency(
-                        parseFloat(editingEmployee.tempRegularHours || 0) *
-                          payRates.regularRate,
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-blue-800 dark:text-blue-300">
-                      Overtime:{" "}
-                      {parseFloat(editingEmployee.tempOvertime || 0).toFixed(2)}{" "}
-                      hrs × ₦{payRates.overtimeRate}
-                    </span>
-                    <span className="font-mono text-blue-900 dark:text-blue-100">
-                      {formatCurrency(
-                        parseFloat(editingEmployee.tempOvertime || 0) *
-                          payRates.overtimeRate,
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-blue-800 dark:text-blue-300">
-                      Commission/Bonus
-                    </span>
-                    <span className="font-mono text-blue-900 dark:text-blue-100">
-                      {formatCurrency(
-                        parseFloat(editingEmployee.tempCommission || 0),
-                      )}
-                    </span>
-                  </div>
+                  {[[
+                    "Base Salary",
+                    parseFloat(editingEmployee.tempBaseSalary || 0)
+                  ],[
+                    "Bonus",
+                    parseFloat(editingEmployee.tempBonus || 0)
+                  ],[
+                    "Allowances",
+                    parseFloat(editingEmployee.tempAllowances || 0)
+                  ],[
+                    `Overtime (${parseFloat(editingEmployee.tempOvertime || 0).toFixed(1)} hrs)`,
+                    parseFloat(editingEmployee.tempOvertime || 0) * payRates.overtimeRate
+                  ],[
+                    "Extra Commission",
+                    parseFloat(editingEmployee.tempCommission || 0)
+                  ]].map(([label, amount]) => amount > 0 ? (
+                    <div key={label} className="flex justify-between">
+                      <span className="text-blue-800 dark:text-blue-300">{label}</span>
+                      <span className="font-mono text-blue-900 dark:text-blue-100">{formatCurrency(amount)}</span>
+                    </div>
+                  ) : null)}
                   <div className="h-px bg-blue-200 dark:bg-blue-700"></div>
                   <div className="flex justify-between font-bold">
-                    <span className="text-blue-900 dark:text-blue-100">
-                      Total Gross Pay
-                    </span>
+                    <span className="text-blue-900 dark:text-blue-100">Total Gross Pay</span>
                     <span className="font-mono text-lg text-blue-900 dark:text-blue-100">
                       {formatCurrency(
-                        parseFloat(editingEmployee.tempRegularHours || 0) *
-                          payRates.regularRate +
-                          parseFloat(editingEmployee.tempOvertime || 0) *
-                            payRates.overtimeRate +
-                          parseFloat(editingEmployee.tempCommission || 0),
+                        parseFloat(editingEmployee.tempBaseSalary || 0) +
+                        parseFloat(editingEmployee.tempBonus || 0) +
+                        parseFloat(editingEmployee.tempAllowances || 0) +
+                        parseFloat(editingEmployee.tempOvertime || 0) * payRates.overtimeRate +
+                        parseFloat(editingEmployee.tempCommission || 0)
                       )}
                     </span>
                   </div>
