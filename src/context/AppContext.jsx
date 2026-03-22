@@ -167,7 +167,13 @@ export const AppProvider = ({ children }) => {
 
     // Define role-based access
     const rolePermissions = {
-      user: ["Accounting", "Inventory", "Attendance", "Analytics"],
+      user: [
+        "Accounting",
+        "Inventory",
+        "Attendance",
+        "Analytics",
+        "Incident Reporting",
+      ],
       manager: [
         "Accounting",
         "Inventory",
@@ -175,6 +181,7 @@ export const AppProvider = ({ children }) => {
         "Attendance",
         "Finance",
         "Analytics",
+        "Incident Reporting",
       ],
       admin: ["*"], // All modules
     };

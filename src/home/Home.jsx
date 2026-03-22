@@ -138,6 +138,7 @@ const iconMap = {
   Attendance: { icon: "fa-id-badge", color: "emerald" },
   HRM: { icon: "fa-people-group", color: "rose" },
   Security: { icon: "fa-lock", color: "red" },
+  "Incident Reporting": { icon: "fa-triangle-exclamation", color: "red" },
   DocSign: { icon: "fa-pen-fancy", color: "pink" },
   // "": { icon: "fa-pen-fancy", color: "pink" },
   Admin: { icon: "fa-sliders", color: "gray" },
@@ -441,7 +442,7 @@ export default function Home() {
             />
           </div>
           <h1 className="text-3xl md:text-5xl font-black text-[#111418] mb-4 tracking-tight">
-            Welcome back{user?.firstName ? `, ${user.firstName}` : ""}
+            Welcome{user?.firstName ? `, ${user.firstName}` : ""}
           </h1>
           <p className="text-lg text-[#617589]">
             Select a module to launch your workspace.
@@ -449,7 +450,7 @@ export default function Home() {
         </div>
 
         {/* Modules Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 w-full max-w-6xl rounded-l-xl border border-[#dbe0e6] p-6 bg-white shadow-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 w-full max-w-6xl rounded-xl border border-[#dbe0e6] p-6 bg-white shadow-sm">
           {loading &&
             Array.from({ length: 8 }).map((_, i) => (
               <div

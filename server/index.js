@@ -280,6 +280,7 @@ async function start() {
         { id: 11, name: "Purchase Orders", componentName: "PurchaseOrders" },
         { id: 12, name: "Analytics", componentName: "Analytics" },
         { id: 13, name: "Policy", componentName: "Policy" },
+        { id: 14, name: "Incident Reporting", componentName: "IncidentReporting" },
       ];
 
       // Seed modules if empty or update with new modules
@@ -1016,6 +1017,10 @@ async function start() {
   // ============ MAINTENANCE ROUTES ============
   const maintenanceRoutes = require('./routes/maintenance.routes');
   app.use('/api/maintenance', maintenanceRoutes);
+
+  // ============ INCIDENT REPORT ROUTES ============
+  const incidentReportRoutes = require('./routes/incidentReport.routes');
+  app.use('/api/incident-reports', incidentReportRoutes);
 
   // ============ SKU ITEMS ROUTES ============
   const SkuItemModel = require('./models/SkuItem');
