@@ -55,6 +55,10 @@ const DEFAULT_MATERIAL_REQUEST_TYPES = [
   'Capital Expenditure',
 ];
 
+// Prevent duplicate generation when users double-click action buttons.
+const rfqGenerationLocks = new Set();
+const poGenerationLocks = new Set();
+
 const getMaterialRequestTypes = async () => {
   const settings = await SystemSettings.findOne();
   const configured = Array.isArray(settings?.materialRequestTypes)
@@ -601,6 +605,15 @@ router.post('/material-requests/:id/approve', async (req, res) => {
 
 // POST Generate RFQ for approved request and send PDF to selected vendors
 router.post('/material-requests/:id/generate-rfq', authMiddleware, async (req, res) => {
+  const requestId = String(req.params.id || '').trim();
+  if (rfqGenerationLocks.has(requestId)) {
+    return res.status(409).json({
+      success: false,
+      message: 'RFQ generation already in progress for this request',
+    });
+  }
+
+  rfqGenerationLocks.add(requestId);
   try {
     const { vendorIds = [] } = req.body || {};
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -638,8 +651,23 @@ router.post('/material-requests/:id/generate-rfq', authMiddleware, async (req, r
         .filter(Boolean),
     );
 
+    const recipientsToProcess = recipients.filter((vendor) => {
+      const vendorObjectId = String(vendor?._id || '');
+      return vendorObjectId && !existingVendorIdSet.has(vendorObjectId);
+    });
+
+    if (recipientsToProcess.length === 0) {
+      return res.json({
+        success: true,
+        created: false,
+        message: 'RFQ already exists for selected vendor(s)',
+        request,
+        results: [],
+      });
+    }
+
     const createdRfqs = [];
-    for (const vendor of recipients) {
+    for (const vendor of recipientsToProcess) {
       const vendorObjectId = String(vendor?._id || '');
       if (!vendorObjectId || existingVendorIdSet.has(vendorObjectId)) {
         continue;
@@ -703,7 +731,7 @@ router.post('/material-requests/:id/generate-rfq', authMiddleware, async (req, r
     }
 
     const sendResults = [];
-    for (const vendor of recipients) {
+    for (const vendor of recipientsToProcess) {
       try {
         const mailOptions = {
           from: process.env.EMAIL_USER,
@@ -752,13 +780,14 @@ router.post('/material-requests/:id/generate-rfq', authMiddleware, async (req, r
       type: 'status_change',
       author: actorName,
       authorId: req.user?._id,
-      text: `RFQ sent to ${successCount}/${recipients.length} selected vendor(s)`,
+      text: `RFQ sent to ${successCount}/${recipientsToProcess.length} selected vendor(s)`,
       timestamp: new Date(),
     });
     await request.save();
 
     return res.json({
       success: true,
+      created: true,
       message: `RFQ processed for ${successCount} vendor(s)`,
       request,
       results: sendResults,
@@ -766,11 +795,22 @@ router.post('/material-requests/:id/generate-rfq', authMiddleware, async (req, r
   } catch (err) {
     console.error('Error generating RFQ:', err);
     return res.status(500).json({ success: false, message: 'Failed to generate RFQ', error: err.message });
+  } finally {
+    rfqGenerationLocks.delete(requestId);
   }
 });
 
 // POST Create Purchase Order from approved request
 router.post('/material-requests/:id/create-po', authMiddleware, async (req, res) => {
+  const requestId = String(req.params.id || '').trim();
+  if (poGenerationLocks.has(requestId)) {
+    return res.status(409).json({
+      success: false,
+      message: 'Purchase order generation already in progress for this request',
+    });
+  }
+
+  poGenerationLocks.add(requestId);
   try {
     const { vendor } = req.body || {};
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -811,6 +851,8 @@ router.post('/material-requests/:id/create-po', authMiddleware, async (req, res)
   } catch (err) {
     console.error('Error creating purchase order from request:', err);
     return res.status(500).json({ success: false, message: 'Failed to create purchase order', error: err.message });
+  } finally {
+    poGenerationLocks.delete(requestId);
   }
 });
 

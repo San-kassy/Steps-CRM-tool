@@ -1,13 +1,20 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { useAppContext } from "../../context/useAppContext";
 import { useAuth } from "../../context/useAuth";
 import Breadcrumb from "../Breadcrumb";
 import { apiService } from "../../services/api";
 import { toast } from "react-hot-toast";
 import DataTable from "../common/DataTable";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 const PurchaseOrders = () => {
+  const location = useLocation();
   const navigate = useNavigate();
   const { modules } = useAppContext();
   const { user } = useAuth();
@@ -43,6 +50,7 @@ const PurchaseOrders = () => {
   // API Data States
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [poVendorSearch, setPoVendorSearch] = useState("");
   const [activeUsers, setActiveUsers] = useState([]);
   const [unitOptions, setUnitOptions] = useState([]);
   const [unitMeta, setUnitMeta] = useState({});
@@ -172,26 +180,28 @@ const PurchaseOrders = () => {
     const poSearch = sessionStorage.getItem("purchaseOrdersSearch");
     const poOpenId = sessionStorage.getItem("purchaseOrdersOpenPoId");
     const poOpenNumber = sessionStorage.getItem("purchaseOrdersOpenPoNumber");
+    const statePoId = String(location.state?.openPoId || "").trim();
+    const statePoNumber = String(location.state?.openPoNumber || "").trim();
 
     if (poSearch) {
       setSearchQuery(poSearch);
       sessionStorage.removeItem("purchaseOrdersSearch");
     }
 
-    if (poOpenId || poOpenNumber) {
+    if (poOpenId || poOpenNumber || statePoId || statePoNumber) {
       pendingOpenPoRef.current = {
-        id: poOpenId || "",
-        number: poOpenNumber || "",
+        id: poOpenId || statePoId || "",
+        number: poOpenNumber || statePoNumber || "",
       };
       sessionStorage.removeItem("purchaseOrdersOpenPoId");
       sessionStorage.removeItem("purchaseOrdersOpenPoNumber");
     }
-  }, []);
+  }, [location.state]);
 
   const fetchVendors = async () => {
     try {
       const response = await apiService.get("/api/vendors", {
-        params: { limit: 1000, status: "Active" }, // Get all active vendors
+        params: { limit: 1000 },
       });
 
       const payload = response?.data ?? response;
@@ -203,7 +213,11 @@ const PurchaseOrders = () => {
             ? payload.data.vendors
             : [];
 
-      setVendors(nextVendors);
+      setVendors(
+        nextVendors.filter((vendor) =>
+          String(vendor?.companyName || vendor?.name || "").trim(),
+        ),
+      );
     } catch (err) {
       console.error("Error fetching vendors:", err);
       toast.error("Failed to load vendors");
@@ -260,6 +274,28 @@ const PurchaseOrders = () => {
       setUnitMeta({});
     }
   };
+
+  const filteredPoVendors = useMemo(() => {
+    const search = String(poVendorSearch || "")
+      .toLowerCase()
+      .trim();
+    if (!search) return vendors;
+
+    return vendors.filter((vendor) => {
+      const name = String(
+        vendor?.companyName || vendor?.name || "",
+      ).toLowerCase();
+      const email = String(vendor?.email || "").toLowerCase();
+      const vendorId = String(
+        vendor?.vendorId || vendor?._id || vendor?.id || "",
+      ).toLowerCase();
+      return (
+        name.includes(search) ||
+        email.includes(search) ||
+        vendorId.includes(search)
+      );
+    });
+  }, [vendors, poVendorSearch]);
 
   const getPoUnitLabel = (unitName) => {
     const cleaned = String(unitName || "").trim();
@@ -686,6 +722,7 @@ const PurchaseOrders = () => {
       });
       setShowCommentMentionDropdown(false);
       setCommentMentionSearch("");
+      setPoVendorSearch("");
       setIsEditing(false);
     } catch (err) {
       console.error("Error loading purchase order:", err);
@@ -717,14 +754,6 @@ const PurchaseOrders = () => {
   const handleDeleteSelectedRows = async () => {
     if (selectedRows.size === 0) {
       toast.error("No purchase orders selected");
-      return;
-    }
-
-    if (
-      !window.confirm(
-        `Are you sure you want to delete ${selectedRows.size} purchase order(s)? This action cannot be undone.`,
-      )
-    ) {
       return;
     }
 
@@ -1495,6 +1524,14 @@ const PurchaseOrders = () => {
                     <span className="text-sm font-medium text-[#111418]">
                       Vendor
                     </span>
+                    <input
+                      type="text"
+                      value={poVendorSearch}
+                      disabled={!isEditing || selectedPo?.isLocked}
+                      onChange={(e) => setPoVendorSearch(e.target.value)}
+                      placeholder="Search vendor by name, email, or ID"
+                      className="w-full rounded-lg border border-[#dbe0e6] h-10 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#137fec]/50 focus:border-[#137fec] disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    />
                     <select
                       value={editForm.vendor}
                       disabled={!isEditing || selectedPo?.isLocked}
@@ -1507,15 +1544,18 @@ const PurchaseOrders = () => {
                       className="w-full rounded-lg border border-[#dbe0e6] h-10 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#137fec]/50 focus:border-[#137fec] disabled:bg-gray-100 disabled:cursor-not-allowed"
                     >
                       <option value="">Select vendor</option>
-                      {vendors.map((vendor) => {
+                      {filteredPoVendors.map((vendor) => {
                         const vendorName =
                           vendor.companyName || vendor.name || "Unknown Vendor";
+                        const vendorStatus = String(vendor.status || "").trim();
                         return (
                           <option
                             key={vendor._id || vendor.id || vendorName}
                             value={vendorName}
                           >
-                            {vendorName}
+                            {vendorStatus
+                              ? `${vendorName} (${vendorStatus})`
+                              : vendorName}
                           </option>
                         );
                       })}

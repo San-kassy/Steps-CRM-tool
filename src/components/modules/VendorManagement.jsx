@@ -16,6 +16,21 @@ const VendorManagement = ({ onBack }) => {
   const [totalPages, setTotalPages] = useState(1);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingVendorId, setEditingVendorId] = useState("");
+  const [isUpdatingVendor, setIsUpdatingVendor] = useState(false);
+  const [editForm, setEditForm] = useState({
+    companyName: "",
+    contactPerson: "",
+    email: "",
+    phone: "",
+    serviceType: "",
+    status: "Active",
+    address: "",
+    city: "",
+    state: "",
+    zipCode: "",
+  });
 
   const fetchVendors = useCallback(async () => {
     try {
@@ -62,6 +77,10 @@ const VendorManagement = ({ onBack }) => {
       .substring(0, 2);
   };
 
+  const getVendorDisplayName = (vendor) =>
+    String(vendor?.companyName || vendor?.name || "").trim() ||
+    "Unknown Vendor";
+
   const handleViewDetails = (vendorId) => {
     const vendor = vendors.find((v) => v._id === vendorId);
     if (vendor) {
@@ -70,7 +89,98 @@ const VendorManagement = ({ onBack }) => {
   };
 
   const handleEditVendor = (_vendorId) => {
-    toast("Edit vendor feature coming soon");
+    const vendor = vendors.find(
+      (v) => String(v?._id || v?.id || "") === String(_vendorId),
+    );
+    if (!vendor) {
+      toast.error("Vendor not found");
+      return;
+    }
+
+    setEditingVendorId(String(vendor._id || vendor.id || ""));
+    setEditForm({
+      companyName: String(vendor.companyName || vendor.name || ""),
+      contactPerson: String(vendor.contactPerson || vendor.contactName || ""),
+      email: String(vendor.email || ""),
+      phone: String(vendor.phone || ""),
+      serviceType: String(vendor.serviceType || ""),
+      status: String(vendor.status || "Active"),
+      address: String(vendor.address || ""),
+      city: String(vendor.city || ""),
+      state: String(vendor.state || ""),
+      zipCode: String(vendor.zipCode || vendor.zip || ""),
+    });
+    setShowEditModal(true);
+  };
+
+  const handleEditFormChange = (e) => {
+    const { name, value } = e.target;
+    setEditForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleSaveVendorEdit = async (e) => {
+    e.preventDefault();
+    if (!editingVendorId) return;
+
+    if (!editForm.companyName.trim()) {
+      toast.error("Company name is required");
+      return;
+    }
+    if (!editForm.email.trim()) {
+      toast.error("Email is required");
+      return;
+    }
+    if (!editForm.phone.trim()) {
+      toast.error("Phone number is required");
+      return;
+    }
+
+    try {
+      setIsUpdatingVendor(true);
+      const payload = {
+        companyName: editForm.companyName.trim(),
+        contactPerson: editForm.contactPerson.trim(),
+        email: editForm.email.trim(),
+        phone: editForm.phone.trim(),
+        serviceType: editForm.serviceType.trim(),
+        status: editForm.status,
+        address: editForm.address.trim(),
+        city: editForm.city.trim(),
+        state: editForm.state.trim(),
+        zipCode: editForm.zipCode.trim(),
+      };
+
+      const response = await apiService.put(
+        `/api/vendors/${editingVendorId}`,
+        payload,
+      );
+      const updatedVendor = response?.data || response;
+
+      setVendors((prev) =>
+        prev.map((vendor) => {
+          const id = String(vendor?._id || vendor?.id || "");
+          return id === editingVendorId
+            ? { ...vendor, ...updatedVendor }
+            : vendor;
+        }),
+      );
+
+      toast.success("Vendor updated successfully");
+      setShowEditModal(false);
+      setEditingVendorId("");
+      fetchVendors();
+    } catch (error) {
+      toast.error(
+        error?.serverData?.error ||
+          error?.response?.data?.error ||
+          "Failed to update vendor",
+      );
+    } finally {
+      setIsUpdatingVendor(false);
+    }
   };
 
   const handleVendorAdded = (newVendor) => {
@@ -230,12 +340,12 @@ const VendorManagement = ({ onBack }) => {
                         ></div>
                       ) : (
                         <div className="size-12 rounded-full flex items-center justify-center bg-indigo-100 text-indigo-600 font-bold text-lg border border-indigo-200 shrink-0">
-                          {getInitials(vendor.name)}
+                          {getInitials(getVendorDisplayName(vendor))}
                         </div>
                       )}
                       <div>
                         <h3 className="text-slate-900 font-bold text-base line-clamp-1">
-                          {vendor.name}
+                          {getVendorDisplayName(vendor)}
                         </h3>
                         <p className="text-slate-500 text-sm">
                           {vendor.serviceType || "General"}
@@ -324,6 +434,154 @@ const VendorManagement = ({ onBack }) => {
         onClose={() => setShowAddModal(false)}
         onVendorAdded={handleVendorAdded}
       />
+
+      {showEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setShowEditModal(false)}
+          ></div>
+          <div className="relative bg-white w-full max-w-2xl rounded-xl shadow-xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">Edit Vendor</h3>
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="size-8 rounded-full text-slate-500 hover:bg-slate-100"
+              >
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <form onSubmit={handleSaveVendorEdit} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm text-slate-600">Company Name *</span>
+                  <input
+                    type="text"
+                    name="companyName"
+                    value={editForm.companyName}
+                    onChange={handleEditFormChange}
+                    className="px-3 py-2 rounded-lg border border-slate-300"
+                    required
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm text-slate-600">Contact Person</span>
+                  <input
+                    type="text"
+                    name="contactPerson"
+                    value={editForm.contactPerson}
+                    onChange={handleEditFormChange}
+                    className="px-3 py-2 rounded-lg border border-slate-300"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm text-slate-600">Email *</span>
+                  <input
+                    type="email"
+                    name="email"
+                    value={editForm.email}
+                    onChange={handleEditFormChange}
+                    className="px-3 py-2 rounded-lg border border-slate-300"
+                    required
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm text-slate-600">Phone *</span>
+                  <input
+                    type="text"
+                    name="phone"
+                    value={editForm.phone}
+                    onChange={handleEditFormChange}
+                    className="px-3 py-2 rounded-lg border border-slate-300"
+                    required
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm text-slate-600">Service Type</span>
+                  <input
+                    type="text"
+                    name="serviceType"
+                    value={editForm.serviceType}
+                    onChange={handleEditFormChange}
+                    className="px-3 py-2 rounded-lg border border-slate-300"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm text-slate-600">Status</span>
+                  <select
+                    name="status"
+                    value={editForm.status}
+                    onChange={handleEditFormChange}
+                    className="px-3 py-2 rounded-lg border border-slate-300"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 md:col-span-2">
+                  <span className="text-sm text-slate-600">Address</span>
+                  <input
+                    type="text"
+                    name="address"
+                    value={editForm.address}
+                    onChange={handleEditFormChange}
+                    className="px-3 py-2 rounded-lg border border-slate-300"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm text-slate-600">City</span>
+                  <input
+                    type="text"
+                    name="city"
+                    value={editForm.city}
+                    onChange={handleEditFormChange}
+                    className="px-3 py-2 rounded-lg border border-slate-300"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm text-slate-600">State</span>
+                  <input
+                    type="text"
+                    name="state"
+                    value={editForm.state}
+                    onChange={handleEditFormChange}
+                    className="px-3 py-2 rounded-lg border border-slate-300"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm text-slate-600">Zip Code</span>
+                  <input
+                    type="text"
+                    name="zipCode"
+                    value={editForm.zipCode}
+                    onChange={handleEditFormChange}
+                    className="px-3 py-2 rounded-lg border border-slate-300"
+                  />
+                </label>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingVendor}
+                  className="px-4 py-2 rounded-lg bg-primary text-white disabled:opacity-60"
+                >
+                  {isUpdatingVendor ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

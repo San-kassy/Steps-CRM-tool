@@ -357,6 +357,7 @@ const MaterialRequests = () => {
 
   const handleGenerateRfq = async () => {
     if (!selectedRequest?._id) return;
+    if (sendingRfq) return;
     if (selectedRfqVendorIds.length === 0) {
       toast.error("Select at least one vendor");
       return;
@@ -379,7 +380,11 @@ const MaterialRequests = () => {
         );
       }
 
-      toast.success(response?.message || "RFQ sent to selected vendors");
+      if (response?.created === false) {
+        toast("RFQ already exists for selected vendor(s)");
+      } else {
+        toast.success(response?.message || "RFQ sent to selected vendors");
+      }
       setShowRfqModal(false);
       setSelectedRfqVendorIds([]);
     } catch (err) {
@@ -391,6 +396,7 @@ const MaterialRequests = () => {
 
   const handleCreatePoFromApproved = async () => {
     if (!selectedRequest?._id) return;
+    if (creatingPo) return;
     setCreatingPo(true);
     try {
       const response = await apiService.post(
@@ -414,7 +420,11 @@ const MaterialRequests = () => {
         await openPurchaseOrderFromActivity(po.poNumber, po._id || po.id);
       }
 
-      toast.success(response?.message || "Purchase order created");
+      if (response?.created === false) {
+        toast("Purchase order already exists for this request");
+      } else {
+        toast.success(response?.message || "Purchase order created");
+      }
     } catch (err) {
       toast.error(
         err?.response?.data?.message || "Failed to create purchase order",
@@ -863,6 +873,68 @@ const MaterialRequests = () => {
       [name]: value,
     }));
   };
+
+  const parseRateToNgn = useCallback((currencyCode, rateInput) => {
+    if (currencyCode === "NGN") return 1;
+    const parsedRate = parseFloat(rateInput);
+    return parsedRate > 0 ? parsedRate : null;
+  }, []);
+
+  const getCurrencyOptionRateToNgn = useCallback(
+    (currencyCode) => {
+      if (currencyCode === "NGN") return 1;
+      const option = (currencyOptions || []).find(
+        (entry) => String(entry?.code || "").trim() === currencyCode,
+      );
+      const fallbackRate = parseFloat(
+        option?.exchangeRateToNgn ||
+          option?.rateToNgn ||
+          option?.exchangeRate ||
+          option?.rate ||
+          "",
+      );
+      return fallbackRate > 0 ? fallbackRate : null;
+    },
+    [currencyOptions],
+  );
+
+  const formatConvertedAmount = useCallback((value) => {
+    if (!Number.isFinite(value)) return "";
+    return String(Number(value.toFixed(4)));
+  }, []);
+
+  const convertLineItemAmountsBetweenCurrencies = useCallback(
+    ({ fromCurrency, toCurrency, fromRateToNgn, toRateToNgn }) => {
+      if (
+        !fromCurrency ||
+        !toCurrency ||
+        fromCurrency === toCurrency ||
+        !(fromRateToNgn > 0) ||
+        !(toRateToNgn > 0)
+      ) {
+        return false;
+      }
+
+      setLineItems((prevItems) =>
+        prevItems.map((item) => {
+          const originalAmount = parseFloat(item?.amount);
+          if (!Number.isFinite(originalAmount)) return item;
+
+          // Preserve value in NGN, then express it in target currency.
+          const amountInNgn = originalAmount * fromRateToNgn;
+          const convertedAmount = amountInNgn / toRateToNgn;
+
+          return {
+            ...item,
+            amount: formatConvertedAmount(convertedAmount),
+          };
+        }),
+      );
+
+      return true;
+    },
+    [formatConvertedAmount],
+  );
 
   const handleLineItemChange = (index, field, value) => {
     const updatedItems = [...lineItems];
@@ -1408,8 +1480,15 @@ const MaterialRequests = () => {
     let poModuleId = 11;
 
     const normalizedPoNumber = String(poNumber || "").trim();
-    const candidatePoId =
-      typeof poId === "string" ? poId : poId?._id || poId?.id || "";
+    const candidatePoId = (() => {
+      if (typeof poId === "string") return poId;
+      if (poId?._id || poId?.id) return poId._id || poId.id;
+      if (poId && typeof poId.toString === "function") {
+        const asText = String(poId.toString() || "").trim();
+        if (asText && asText !== "[object Object]") return asText;
+      }
+      return "";
+    })();
     const normalizedPoId = String(candidatePoId || "").trim();
     const hasUsablePoId =
       normalizedPoId &&
@@ -1455,7 +1534,12 @@ const MaterialRequests = () => {
       // Keep fallback module id and continue navigation.
     }
 
-    navigate(`/home/${poModuleId}`);
+    navigate(`/home/${poModuleId}`, {
+      state: {
+        openPoId: hasUsablePoId ? normalizedPoId : "",
+        openPoNumber: normalizedPoNumber,
+      },
+    });
   };
 
   const openRfqFromActivity = async (rfqNumber, rfqId) => {
@@ -2107,13 +2191,53 @@ const MaterialRequests = () => {
                           name="currency"
                           value={formData.currency || appCurrency}
                           onChange={(e) => {
-                            handleFormChange(e);
-                            if (e.target.value === "NGN") {
-                              setFormData((prev) => ({
-                                ...prev,
-                                exchangeRate: "",
-                              }));
+                            const nextCurrency = e.target.value;
+                            const previousCurrency =
+                              formData.currency || appCurrency || "NGN";
+                            const previousRateToNgn = parseRateToNgn(
+                              previousCurrency,
+                              formData.exchangeRate,
+                            );
+                            const inferredNextRateToNgn =
+                              getCurrencyOptionRateToNgn(nextCurrency);
+
+                            if (
+                              previousCurrency !== nextCurrency &&
+                              previousRateToNgn > 0 &&
+                              inferredNextRateToNgn > 0
+                            ) {
+                              convertLineItemAmountsBetweenCurrencies({
+                                fromCurrency: previousCurrency,
+                                toCurrency: nextCurrency,
+                                fromRateToNgn: previousRateToNgn,
+                                toRateToNgn: inferredNextRateToNgn,
+                              });
+                            } else if (
+                              previousCurrency !== nextCurrency &&
+                              previousCurrency !== "NGN" &&
+                              nextCurrency === "NGN" &&
+                              previousRateToNgn > 0
+                            ) {
+                              convertLineItemAmountsBetweenCurrencies({
+                                fromCurrency: previousCurrency,
+                                toCurrency: nextCurrency,
+                                fromRateToNgn: previousRateToNgn,
+                                toRateToNgn: 1,
+                              });
                             }
+
+                            setFormData((prev) => {
+                              const shouldKeepRate =
+                                nextCurrency !== "NGN" &&
+                                inferredNextRateToNgn > 0;
+                              return {
+                                ...prev,
+                                currency: nextCurrency,
+                                exchangeRate: shouldKeepRate
+                                  ? String(inferredNextRateToNgn)
+                                  : "",
+                              };
+                            });
                           }}
                           className="w-full rounded-lg border border-gray-300 bg-white text-[#111418] focus:ring-2 focus:ring-[#137fec]/20 focus:border-[#137fec] pl-10 pr-8 py-2.5 appearance-none"
                         >
