@@ -2066,23 +2066,85 @@ async function start() {
   
   let localAttendanceRecords = [];
 
+  const normalizeAttendanceRecord = (record) => ({
+    _id: record._id,
+    id: record.id ?? record._id,
+    name: record.name || record.user || 'Demo User',
+    user: record.user || record.name || 'Demo User',
+    employeeId: record.employeeId || '',
+    status: record.status || 'present',
+    date: record.date || new Date(record.checkInTime || record.createdAt || Date.now()).toISOString(),
+    checkInTime: record.checkInTime || record.createdAt || new Date(),
+    source: record.source || 'database',
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  });
+
+  const computeAttendanceStats = (records = []) => ({
+    presentCount: records.filter((r) => ['present', 'on-time'].includes(String(r.status || '').toLowerCase())).length,
+    leaveCount: records.filter((r) => ['leave', 'on-leave'].includes(String(r.status || '').toLowerCase())).length,
+    absentCount: records.filter((r) => String(r.status || '').toLowerCase() === 'absent').length,
+    lateCount: records.filter((r) => String(r.status || '').toLowerCase() === 'late').length,
+  });
+
   app.post('/api/attendance', async (req, res) => {
     try {
       const { name, employeeId, status } = req.body;
-      const newRecord = {
-        name: name || 'Demo User',
-        employeeId: employeeId || 'EMP-1337',
-        status: status || 'present',
-        checkInTime: new Date()
-      };
-      // Keep only most recent 50 records to prevent memory leak
-      localAttendanceRecords.unshift(newRecord);
+      const cleanName = String(name || '').trim() || 'Demo User';
+      const cleanEmployeeId = String(employeeId || '').trim() || 'EMP-1337';
+      const cleanStatus = String(status || 'present').trim().toLowerCase() || 'present';
+      const checkInTime = new Date();
+      const attendanceDate = checkInTime.toISOString().slice(0, 10);
+
+      const nextIdCandidate = await AttendanceModel.countDocuments().catch(() => 0);
+      const persistedRecord = await AttendanceModel.findOneAndUpdate(
+        { employeeId: cleanEmployeeId, date: attendanceDate },
+        {
+          $set: {
+            name: cleanName,
+            user: cleanName,
+            employeeId: cleanEmployeeId,
+            status: cleanStatus,
+            date: attendanceDate,
+            checkInTime,
+            source: 'local-attendance-form',
+          },
+          $setOnInsert: {
+            id: nextIdCandidate + 1,
+          },
+        },
+        { new: true, upsert: true, runValidators: true },
+      );
+
+      const normalized = normalizeAttendanceRecord(persistedRecord);
+      const cacheKey = `${cleanEmployeeId}:${attendanceDate}`;
+      const existingCacheIndex = localAttendanceRecords.findIndex((record) => {
+        const recordDate = String(record.date || '').slice(0, 10);
+        return `${String(record.employeeId || '')}:${recordDate}` === cacheKey;
+      });
+      if (existingCacheIndex >= 0) {
+        localAttendanceRecords[existingCacheIndex] = normalized;
+      } else {
+        localAttendanceRecords.unshift(normalized);
+      }
       if (localAttendanceRecords.length > 50) localAttendanceRecords.pop();
 
-      res.status(201).json({ message: 'Attendance marked', record: newRecord });
+      res.status(201).json({ message: 'Attendance marked', record: normalized });
     } catch (e) {
       console.error(e);
-      res.status(500).json({ error: 'Failed to mark attendance' });
+
+      const fallbackRecord = {
+        name: String(req.body?.name || '').trim() || 'Demo User',
+        employeeId: String(req.body?.employeeId || '').trim() || 'EMP-1337',
+        status: String(req.body?.status || 'present').trim().toLowerCase() || 'present',
+        checkInTime: new Date(),
+        source: 'in-memory-fallback',
+      };
+
+      localAttendanceRecords.unshift(fallbackRecord);
+      if (localAttendanceRecords.length > 50) localAttendanceRecords.pop();
+
+      res.status(201).json({ message: 'Attendance marked using fallback storage', record: fallbackRecord });
     }
   });
 
@@ -2113,27 +2175,40 @@ async function start() {
             console.log(`Endpoint ${url} failed: ${err.message}`);
           }
         }
-        
+
         console.error('All external attendance endpoints failed.');
       }
     } catch (error) {
       console.error('Error in external attendance proxy:', error.message);
     }
-    
-    // Remote fetch failed or no API key. Fall back to local volatile session records.
-    const presentCount = localAttendanceRecords.filter(r => r.status === 'present' || r.status === 'on-time').length;
-    const leaveCount = localAttendanceRecords.filter(r => r.status === 'leave' || r.status === 'on-leave').length;
-    const absentCount = localAttendanceRecords.filter(r => r.status === 'absent').length;
-    const lateCount = localAttendanceRecords.filter(r => r.status === 'late').length;
 
-    res.json({ 
-      records: localAttendanceRecords, 
-      totalEmployees: localAttendanceRecords.length,
-      presentCount,
-      leaveCount,
-      absentCount,
-      lateCount
-    });
+    try {
+      const persistedRecords = await AttendanceModel.find()
+        .sort({ checkInTime: -1, createdAt: -1 })
+        .limit(500)
+        .lean();
+      const records = persistedRecords.length > 0
+        ? persistedRecords.map(normalizeAttendanceRecord)
+        : localAttendanceRecords;
+      const stats = computeAttendanceStats(records);
+
+      res.json({
+        records,
+        totalEmployees: records.length,
+        ...stats,
+      });
+    } catch (dbError) {
+      console.error('Error loading persisted attendance records:', dbError);
+
+      const records = localAttendanceRecords;
+      const stats = computeAttendanceStats(records);
+
+      res.json({
+        records,
+        totalEmployees: records.length,
+        ...stats,
+      });
+    }
   });
 
   // Material Requests endpoints
