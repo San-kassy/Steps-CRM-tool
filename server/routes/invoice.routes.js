@@ -3,7 +3,28 @@ const express = require('express');
 const router  = express.Router();
 const Invoice  = require('../models/Invoice');
 const InventoryIssue = require('../models/InventoryIssue');
+const NotificationModel = require('../models/Notification');
 const { authMiddleware } = require('../middleware/auth');
+
+const createInvoiceNotification = async ({ title, message, sourceKey, metadata = {} }) => {
+  try {
+    const existing = await NotificationModel.findOne({ sourceKey });
+    if (existing) return existing;
+
+    return NotificationModel.create({
+      title,
+      message,
+      type: 'success',
+      category: 'finance',
+      source: 'invoice-module',
+      sourceKey,
+      metadata,
+    });
+  } catch (error) {
+    console.error('Error creating invoice notification:', error);
+    return null;
+  }
+};
 
 // ── GET all invoices ────────────────────────────────────────────────────────
 router.get('/', authMiddleware, async (req, res) => {
@@ -62,6 +83,20 @@ router.patch('/:id/status', authMiddleware, async (req, res) => {
     invoice.status = status;
     if (status === 'paid') invoice.paidAt = new Date();
     await invoice.save();
+
+    if (status === 'paid') {
+      await createInvoiceNotification({
+        title: `Invoice paid: ${invoice.invoiceNumber}`,
+        message: `Invoice ${invoice.invoiceNumber} for ${invoice.billTo} has been marked as paid.`,
+        sourceKey: `invoice-paid-${invoice._id}`,
+        metadata: {
+          invoiceId: invoice._id,
+          invoiceNumber: invoice.invoiceNumber,
+          billTo: invoice.billTo,
+          totalAmount: invoice.totalAmount,
+        },
+      });
+    }
 
     res.json({ message: `Invoice marked as ${status}`, data: invoice });
   } catch (err) {

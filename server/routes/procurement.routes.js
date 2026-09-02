@@ -12,6 +12,7 @@ const InventoryItem = require('../models/InventoryItem');
 const InventoryIssue = require('../models/InventoryIssue');
 const StockTransfer = require('../models/StockTransfer');
 const StockMovement = require('../models/StockMovement');
+const NotificationModel = require('../models/Notification');
 const { transporter } = require('../utils/emailService');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { logMovement } = require('./inventory.routes');
@@ -21,6 +22,26 @@ const {
   getStockAtLocation,
 } = require('../utils/stockTransferHelpers');
 const { buildApprovalChain } = require('../utils/approvalRuleHelper');
+
+const createProcurementNotification = async ({ title, message, sourceKey, metadata = {} }) => {
+  try {
+    const existing = await NotificationModel.findOne({ sourceKey });
+    if (existing) return existing;
+
+    return NotificationModel.create({
+      title,
+      message,
+      type: 'info',
+      category: 'procurement',
+      source: 'procurement-module',
+      sourceKey,
+      metadata,
+    });
+  } catch (error) {
+    console.error('Error creating procurement notification:', error);
+    return null;
+  }
+};
 
 const REQUEST_TYPE_MAP = {
   'internal transfer': 'Internal Transfer',
@@ -726,6 +747,20 @@ router.post('/material-requests/:id/generate-rfq', authMiddleware, async (req, r
       createdRfqs.push({
         id: rfq._id,
         number: rfq.rfqNumber,
+      });
+      await MaterialRequest.findByIdAndUpdate(request._id, {
+        $set: { linkedRFQId: rfq._id },
+        $addToSet: { linkedRFQIds: rfq._id },
+      });
+      await createProcurementNotification({
+        title: `RFQ sent: ${rfq.rfqNumber}`,
+        message: `RFQ was created for material request ${request.requestId || request._id}.`,
+        sourceKey: `procurement-rfq-created-${rfq._id}`,
+        metadata: {
+          requestId: request._id,
+          rfqId: rfq._id,
+          rfqNumber: rfq.rfqNumber,
+        },
       });
       existingVendorIdSet.add(vendorObjectId);
     }

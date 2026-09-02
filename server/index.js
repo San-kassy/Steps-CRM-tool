@@ -2455,6 +2455,25 @@ async function start() {
         ],
       });
 
+      materialRequest.linkedPurchaseOrderId = purchaseOrder._id;
+      materialRequest.linkedPurchaseOrderIds = Array.isArray(materialRequest.linkedPurchaseOrderIds)
+        ? [...new Set([...materialRequest.linkedPurchaseOrderIds.map(String), String(purchaseOrder._id)])]
+        : [purchaseOrder._id];
+
+      await NotificationModel.create({
+        title: `Purchase Order created: ${purchaseOrder.poNumber}`,
+        message: `A purchase order was created from material request ${materialRequest.requestId}.`,
+        type: 'success',
+        category: 'procurement',
+        source: 'material-request-approval',
+        sourceKey: `material-request-po-created-${purchaseOrder._id}`,
+        metadata: {
+          materialRequestId: materialRequest._id,
+          purchaseOrderId: purchaseOrder._id,
+          purchaseOrderNumber: purchaseOrder.poNumber,
+        },
+      });
+
       materialRequest.activities.push({
         type: 'po_created',
         author: req.user?.fullName || req.user?.email || 'System',

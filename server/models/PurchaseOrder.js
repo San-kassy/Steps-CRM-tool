@@ -175,6 +175,11 @@ const purchaseOrderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'MaterialRequest',
     },
+    linkedRFQId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'RFQ',
+      default: null,
+    },
     requestBreakdown: {
       requestTitle: { type: String, default: '', trim: true },
       requestedBy: { type: String, default: '', trim: true },

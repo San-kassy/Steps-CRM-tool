@@ -101,9 +101,9 @@ export const apiService = {
   },
 
   accounting: {
-    getTransactions: (params) => api.get('/api/accounting/transactions', { params }),
-    createTransaction: (data) => api.post('/api/accounting/transactions', data),
-    getStats: () => api.get('/api/accounting/stats'),
+    getTransactions: (params) => api.get('/api/finance/journal-entries', { params }),
+    createTransaction: (data) => api.post('/api/finance/journal-entries', data),
+    getStats: () => api.get('/api/finance/reconciliation'),
   },
 
   inventory: {
@@ -121,10 +121,10 @@ export const apiService = {
   },
 
   facility: {
-    getTickets: (params) => api.get('/api/facility/tickets', { params }),
-    createTicket: (data) => api.post('/api/facility/tickets', data),
-    updateTicket: (id, data) => api.put(`/api/facility/tickets/${id}`, data),
-    getStats: () => api.get('/api/facility/stats'),
+    getTickets: (params) => api.get('/api/maintenance', { params }),
+    createTicket: (data) => api.post('/api/maintenance', data),
+    updateTicket: (id, data) => api.put(`/api/maintenance/${id}`, data),
+    getStats: () => api.get('/api/maintenance/stats'),
   },
 
   finance: {

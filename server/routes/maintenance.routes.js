@@ -1,7 +1,29 @@
 const express = require("express");
 const router = express.Router();
 const MaintenanceTicket = require("../models/MaintenanceTicket");
+const NotificationModel = require("../models/Notification");
 const { verifyToken } = require("../middleware/auth");
+
+const createMaintenanceNotification = async ({ title, message, sourceKey, metadata = {}, targetUser = null }) => {
+  try {
+    const existing = await NotificationModel.findOne({ sourceKey });
+    if (existing) return existing;
+
+    return NotificationModel.create({
+      title,
+      message,
+      type: "info",
+      category: "maintenance",
+      source: "maintenance-module",
+      sourceKey,
+      metadata,
+      targetUser,
+    });
+  } catch (error) {
+    console.error("Error creating maintenance notification:", error);
+    return null;
+  }
+};
 
 // Get all maintenance tickets with filtering and pagination
 router.get("/", verifyToken, async (req, res) => {
@@ -183,6 +205,20 @@ router.post("/", verifyToken, async (req, res) => {
     const ticket = new MaintenanceTicket(ticketData);
     await ticket.save();
 
+    await createMaintenanceNotification({
+      title: `Maintenance ticket created: ${ticket.ticketNumber}`,
+      message: `${ticket.title || "A maintenance request"} was created with status ${ticket.status || "Open"}.`,
+      sourceKey: `maintenance-ticket-created-${ticket._id}`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        status: ticket.status,
+        priority: ticket.priority,
+        category: ticket.category,
+      },
+      targetUser: ticket.assignedTo || null,
+    });
+
     // Populate before sending response
     await ticket.populate("reportedBy", "firstName lastName email");
 
@@ -217,6 +253,21 @@ router.put("/:id", verifyToken, async (req, res) => {
 
     if (!ticket) {
       return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    if (String(updateData.status || "").toLowerCase() === "completed") {
+      await createMaintenanceNotification({
+        title: `Maintenance ticket completed: ${ticket.ticketNumber}`,
+        message: `${ticket.title || "A maintenance request"} has been marked completed.`,
+        sourceKey: `maintenance-ticket-completed-${ticket._id}`,
+        metadata: {
+          ticketId: ticket._id,
+          ticketNumber: ticket.ticketNumber,
+          status: ticket.status,
+          priority: ticket.priority,
+        },
+        targetUser: ticket.reportedBy || null,
+      });
     }
 
     // Add to work log

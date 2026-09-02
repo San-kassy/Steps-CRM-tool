@@ -11,6 +11,28 @@ const POReceiptModel = require('../models/POReceipt');
 const InventoryItemModel = require('../models/InventoryItem');
 const VendorModel = require('../models/Vendor');
 const AuditLogModel = require('../models/AuditLog');
+const NotificationModel = require('../models/Notification');
+
+const createWorkflowNotification = async ({ title, message, sourceKey, category, metadata = {}, targetUser = null, type = 'info' }) => {
+  try {
+    const existing = await NotificationModel.findOne({ sourceKey });
+    if (existing) return existing;
+
+    return NotificationModel.create({
+      title,
+      message,
+      type,
+      category,
+      source: 'material-request-workflow',
+      sourceKey,
+      metadata,
+      targetUser,
+    });
+  } catch (error) {
+    console.error('Error creating workflow notification:', error);
+    return null;
+  }
+};
 
 /**
  * Generate RFQ from Material Request
@@ -79,8 +101,10 @@ const generateRFQFromMaterialRequest = async (materialRequestId, vendorId, reque
 
     // Update Material Request with RFQ reference
     await MaterialRequestModel.findByIdAndUpdate(materialRequestId, {
-      status: 'fulfilled',
-      activities: [
+      $set: {
+        status: 'fulfilled',
+        linkedRFQId: rfq._id,
+        activities: [
         ...(materialRequest.activities || []),
         {
           type: 'status_change',
@@ -88,8 +112,25 @@ const generateRFQFromMaterialRequest = async (materialRequestId, vendorId, reque
           authorId: requestedByUser.userId,
           text: 'Material Request fulfilled - RFQ generated',
           poId: null,
+          rfqId: rfq._id,
+          rfqNumber: rfq.rfqNumber,
         },
-      ],
+        ],
+      },
+      $addToSet: { linkedRFQIds: rfq._id },
+    });
+
+    await createWorkflowNotification({
+      title: `RFQ created: ${rfq.rfqNumber}`,
+      message: `RFQ was generated for material request ${materialRequest.requestId}.`,
+      sourceKey: `workflow-rfq-created-${rfq._id}`,
+      category: 'procurement',
+      metadata: {
+        materialRequestId: materialRequest._id,
+        rfqId: rfq._id,
+        rfqNumber: rfq.rfqNumber,
+        vendorId: vendor._id,
+      },
     });
 
     return rfq;
@@ -158,6 +199,7 @@ const generatePOFromRFQ = async (rfqId, quotationIndex, createdByUser) => {
     rfq.status = 'po_generated';
     rfq.bestQuotationIndex = quotationIndex;
     rfq.linkedPOId = po._id;
+    po.linkedRFQId = rfq._id;
     rfq.quotations[quotationIndex].status = 'accepted';
     rfq.activities.push({
       type: 'po_generated',
@@ -166,6 +208,25 @@ const generatePOFromRFQ = async (rfqId, quotationIndex, createdByUser) => {
       description: `PO ${po.poNumber} created from this RFQ`,
     });
     await rfq.save();
+
+    await MaterialRequestModel.findByIdAndUpdate(rfq.materialRequestId, {
+      $set: { linkedPurchaseOrderId: po._id },
+      $addToSet: { linkedPurchaseOrderIds: po._id },
+    });
+
+    await createWorkflowNotification({
+      title: `Purchase Order created: ${po.poNumber}`,
+      message: `PO was created from RFQ ${rfq.rfqNumber}.`,
+      sourceKey: `workflow-po-created-${po._id}`,
+      category: 'procurement',
+      metadata: {
+        materialRequestId: rfq.materialRequestId,
+        rfqId: rfq._id,
+        poId: po._id,
+        poNumber: po.poNumber,
+      },
+      type: 'success',
+    });
 
     return po;
   } catch (error) {
@@ -254,6 +315,21 @@ const recordPaymentForPO = async (poId, paymentAmount, paymentType, paidByUser, 
     });
 
     await po.save();
+
+    await createWorkflowNotification({
+      title: `Payment recorded: ${payment.paymentNumber}`,
+      message: `Payment of ${paymentAmount} was recorded for PO ${po.poNumber}.`,
+      sourceKey: `workflow-payment-recorded-${payment._id}`,
+      category: 'finance',
+      metadata: {
+        poId: po._id,
+        poNumber: po.poNumber,
+        paymentId: payment._id,
+        paymentNumber: payment.paymentNumber,
+        amount: paymentAmount,
+      },
+      type: 'success',
+    });
 
     return {
       payment,
@@ -373,6 +449,20 @@ const receiveItemsFromPO = async (poId, receivedItems, storeLocation, receivedBy
     receipt.inventoryUpdated = true;
     receipt.inventoryUpdateDate = new Date();
     await receipt.save();
+
+    await createWorkflowNotification({
+      title: `Items received: ${receipt.receiptNumber}`,
+      message: `Inventory was updated for PO ${po.poNumber}.`,
+      sourceKey: `workflow-receipt-created-${receipt._id}`,
+      category: 'inventory',
+      metadata: {
+        poId: po._id,
+        poNumber: po.poNumber,
+        receiptId: receipt._id,
+        receiptNumber: receipt.receiptNumber,
+      },
+      type: 'success',
+    });
 
     return {
       receipt,
