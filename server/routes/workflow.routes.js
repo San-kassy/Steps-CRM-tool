@@ -472,6 +472,7 @@ router.get('/material-requests/:id/progress', async (req, res) => {
       materialRequest: {
         id: materialRequest._id,
         requestId: materialRequest.requestId,
+        requestType: materialRequest.requestType,
         status: materialRequest.status,
         createdAt: materialRequest.createdAt,
       },

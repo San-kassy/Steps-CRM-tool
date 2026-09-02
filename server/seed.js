@@ -89,6 +89,16 @@ const seedData = {
       jobTitle: "System Administrator",
     },
     {
+      firstName: "Eclefzy",
+      lastName: "Admin",
+      email: "eclefzy@gmail.com",
+      password: "Admin@123",
+      role: "Admin",
+      status: "Active",
+      department: "IT",
+      jobTitle: "System Administrator",
+    },
+    {
       firstName: "John",
       lastName: "Doe",
       email: "john.doe@netlink.com",
@@ -291,6 +301,7 @@ async function seedUsers() {
       console.log(`   ✓ Seeded ${seedData.users.length} users`);
       console.log('\n   Default credentials:');
       console.log('   Admin: admin@netlink.com / Admin@123');
+      console.log('   Manager: eclefzy@gmail.com / Admin@123');
       console.log('   User: john.doe@netlink.com / User@123');
     } else {
       console.log('   ⊘ Users already exist (use --clear to reset)');

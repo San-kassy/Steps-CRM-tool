@@ -84,6 +84,16 @@ const MaterialRequestWorkflow = ({ materialRequestId, onClose, onSuccess }) => {
     },
   ];
 
+  const requestType = String(workflow?.materialRequest?.requestType || '')
+    .toLowerCase()
+    .trim();
+  const canGenerateRfq =
+    requestType === 'purchase request' ||
+    requestType === 'store' ||
+    requestType === 'rfq';
+  const canReceiveItems =
+    selectedPO?.status === 'partly_paid' || selectedPO?.status === 'paid';
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
@@ -195,13 +205,21 @@ const MaterialRequestWorkflow = ({ materialRequestId, onClose, onSuccess }) => {
                   </div>
                 ))}
                 {workflow.rfqs.length === 0 &&
-                  workflow?.materialRequest?.id && (
+                  workflow?.materialRequest?.id &&
+                  canGenerateRfq && (
                     <button
                       onClick={() => setShowQuotationModal(true)}
                       className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
                     >
                       <Plus size={18} /> Generate RFQ
                     </button>
+                  )}
+                {workflow.rfqs.length === 0 &&
+                  workflow?.materialRequest?.id &&
+                  !canGenerateRfq && (
+                    <p className="text-sm text-gray-500">
+                      RFQ generation is not available for {workflow?.materialRequest?.requestType || 'this request type'}.
+                    </p>
                   )}
               </div>
             </div>
@@ -280,15 +298,14 @@ const MaterialRequestWorkflow = ({ materialRequestId, onClose, onSuccess }) => {
         </div>
 
         {/* Receiving Section */}
-        {selectedPO?.status !== "payment_pending" && (
+        {selectedPO && (
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <Package className="text-purple-600" />
               Item Receiving
             </h2>
             <p className="text-gray-600 mb-4">
-              {selectedPO?.status === "partly_paid" ||
-              selectedPO?.status === "paid"
+              {canReceiveItems
                 ? "Ready to receive items into inventory"
                 : "Please make payment before receiving items"}
             </p>
@@ -314,9 +331,9 @@ const MaterialRequestWorkflow = ({ materialRequestId, onClose, onSuccess }) => {
             ) : (
               <button
                 onClick={() => setShowReceivingModal(true)}
-                disabled={selectedPO?.status === "payment_pending"}
+                disabled={!canReceiveItems}
                 className={`w-full py-2 rounded-lg flex items-center justify-center gap-2 ${
-                  selectedPO?.status === "payment_pending"
+                  !canReceiveItems
                     ? "bg-gray-300 text-gray-600 cursor-not-allowed"
                     : "bg-purple-600 text-white hover:bg-purple-700"
                 }`}
